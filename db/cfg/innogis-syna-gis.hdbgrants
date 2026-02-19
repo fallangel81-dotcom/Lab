@@ -1,0 +1,78 @@
+{
+  "pm-wfm-shared-db": {
+    "object_owner": {
+      "object_privileges": [
+        {
+          "name": "innogis.Addresses",
+          "type": "TABLE",
+          "privileges": ["INSERT", "UPDATE", "DELETE"],
+          "principal_schema_name": "",
+          "principal_name": "SYNA_GIS"
+        },
+        {
+          "name": "innogis.Lots",
+          "type": "TABLE",
+          "privileges": ["INSERT", "UPDATE", "DELETE"],
+          "principal_schema_name": "",
+          "principal_name": "SYNA_GIS"
+        },
+        {
+          "name": "innogis.Components",
+          "type": "TABLE",
+          "privileges": ["INSERT", "UPDATE", "DELETE"],
+          "principal_schema_name": "",
+          "principal_name": "SYNA_GIS"
+        },
+        {
+          "name": "innogis.Joints",
+          "type": "TABLE",
+          "privileges": ["INSERT", "UPDATE", "DELETE"],
+          "principal_schema_name": "",
+          "principal_name": "SYNA_GIS"
+        },
+        {
+          "name": "innogis.Poles",
+          "type": "TABLE",
+          "privileges": ["INSERT", "UPDATE", "DELETE"],
+          "principal_schema_name": "",
+          "principal_name": "SYNA_GIS"
+        },
+        {
+          "name": "innogis.Services",
+          "type": "TABLE",
+          "privileges": ["INSERT", "UPDATE", "DELETE"],
+          "principal_schema_name": "",
+          "principal_name": "SYNA_GIS"
+        },
+        {
+          "name": "innogis.ElectricInstallations",
+          "type": "TABLE",
+          "privileges": ["INSERT", "UPDATE", "DELETE"],
+          "principal_schema_name": "",
+          "principal_name": "SYNA_GIS"
+        },
+        {
+          "name": "innogis.ElectricInstallationsAlt",
+          "type": "TABLE",
+          "privileges": ["INSERT", "UPDATE", "DELETE"],
+          "principal_schema_name": "",
+          "principal_name": "SYNA_GIS"
+        },
+        {
+          "name": "innogis.GasInstallations",
+          "type": "TABLE",
+          "privileges": ["INSERT", "UPDATE", "DELETE"],
+          "principal_schema_name": "",
+          "principal_name": "SYNA_GIS"
+        },
+        {
+          "name": "innogis.HeatInstallations",
+          "type": "TABLE",
+          "privileges": ["INSERT", "UPDATE", "DELETE"],
+          "principal_schema_name": "",
+          "principal_name": "SYNA_GIS"
+        }
+      ]
+    }
+  }
+}
