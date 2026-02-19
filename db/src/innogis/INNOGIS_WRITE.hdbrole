@@ -1,0 +1,57 @@
+{
+  "role": {
+    "name": "innogis::INNOGIS_WRITE",
+    "object_privileges": [
+      {
+        "name": "innogis.Addresses",
+        "type": "TABLE",
+        "privileges": ["INSERT", "UPDATE", "DELETE"]
+      },
+      {
+        "name": "innogis.Lots",
+        "type": "TABLE",
+        "privileges": ["INSERT", "UPDATE", "DELETE"]
+      },
+      {
+        "name": "innogis.Components",
+        "type": "TABLE",
+        "privileges": ["INSERT", "UPDATE", "DELETE"]
+      },
+      {
+        "name": "innogis.Joints",
+        "type": "TABLE",
+        "privileges": ["INSERT", "UPDATE", "DELETE"]
+      },
+      {
+        "name": "innogis.Poles",
+        "type": "TABLE",
+        "privileges": ["INSERT", "UPDATE", "DELETE"]
+      },
+      {
+        "name": "innogis.Services",
+        "type": "TABLE",
+        "privileges": ["INSERT", "UPDATE", "DELETE"]
+      },
+      {
+        "name": "innogis.ElectricInstallations",
+        "type": "TABLE",
+        "privileges": ["INSERT", "UPDATE", "DELETE"]
+      },
+      {
+        "name": "innogis.ElectricInstallationsAlt",
+        "type": "TABLE",
+        "privileges": ["INSERT", "UPDATE", "DELETE"]
+      },
+      {
+        "name": "innogis.GasInstallations",
+        "type": "TABLE",
+        "privileges": ["INSERT", "UPDATE", "DELETE"]
+      },
+      {
+        "name": "innogis.HeatInstallations",
+        "type": "TABLE",
+        "privileges": ["INSERT", "UPDATE", "DELETE"]
+      }
+    ]
+  }
+}
