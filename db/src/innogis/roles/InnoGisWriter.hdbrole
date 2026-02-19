@@ -1,0 +1,15 @@
+{
+  "role": {
+    "name": "innogis.roles::InnoGisWriter",
+    "schema_privileges": [
+      {
+        "privileges": [
+          "SELECT",
+          "INSERT",
+          "UPDATE",
+          "DELETE"
+        ]
+      }
+    ]
+  }
+}

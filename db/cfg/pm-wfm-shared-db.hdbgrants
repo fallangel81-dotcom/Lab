@@ -1,0 +1,21 @@
+{
+  "pm-wfm-shared-db": {
+    "object_owner": {
+      "schema_privileges": [
+        {
+          "privileges_with_grant_option": [
+            "SELECT",
+            "INSERT",
+            "UPDATE",
+            "DELETE"
+          ]
+        }
+      ]
+    },
+    "application_user": {
+      "roles": [
+        "innogis.roles::InnoGisWriter"
+      ]
+    }
+  }
+}
