@@ -1,0 +1,327 @@
+CLASS cl_eam_sts_exit DEFINITION
+  PUBLIC
+  CREATE PUBLIC .
+
+  PUBLIC SECTION.
+
+    INTERFACES if_sadl_exit .
+    INTERFACES if_sadl_exit_calc_element_read .
+    INTERFACES if_sadl_exit_filter_transform .
+  CLASS-METHODS: set_statusprofiles IMPORTING statusprofile_ranges TYPE /iwbep/if_mgw_core_srv_runtime=>abap_select_option_t.
+
+  PROTECTED SECTION.
+    TYPES: BEGIN OF ts_status,
+            statusprofile TYPE j_stsma,
+            statuscode TYPE j_istat,
+           END OF ts_status,
+           tt_status     TYPE STANDARD TABLE OF ts_status WITH DEFAULT KEY,
+           tt_objecttype TYPE STANDARD TABLE OF j_obtyp WITH DEFAULT KEY.
+    METHODS set_comp
+      IMPORTING
+        it_requested_calc_elements TYPE if_sadl_exit_calc_element_read=>tt_elements
+        iv_entity                  TYPE string
+        iv_comp_activesyststs      TYPE string
+        iv_comp_activeusersts      TYPE string
+        iv_comp_statusobject       TYPE string
+      EXPORTING
+        et_requested_orig_elements TYPE if_sadl_exit_calc_element_read=>tt_elements .
+    METHODS set_assoc
+      IMPORTING
+        iv_assoc_activeststxt TYPE string
+        iv_is_user_status     TYPE abap_boolean DEFAULT abap_undefined .
+    METHODS get_object_types
+      RETURNING VALUE(result) TYPE tt_objecttype.
+  PRIVATE SECTION.
+  CLASS-DATA gt_statusprofile_ranges TYPE RANGE OF j_stsma.
+    METHODS determine_statuscode_from_name
+      IMPORTING
+        iv_statusname TYPE j_txt04
+      RETURNING
+        VALUE(result) TYPE tt_status.
+    DATA mv_comp_statusobject TYPE string VALUE 'STATUSOBJECT' ##NO_TEXT.
+    DATA mv_comp_activesyststs TYPE string VALUE 'CONCATENATEDACTIVESYSTSTSNAME' ##NO_TEXT.
+    DATA mv_comp_activeusersts TYPE string VALUE 'CONCATENATEDACTIVEUSERSTSNAME' ##NO_TEXT.
+    DATA mv_assoc_activeststxt TYPE string .
+    DATA mv_is_user_status TYPE abap_boolean VALUE abap_undefined.
+ENDCLASS.
+
+
+
+CLASS CL_EAM_STS_EXIT IMPLEMENTATION.
+
+
+  METHOD determine_statuscode_from_name.
+    " abap_undefined means that sub-class does not support performance improvement.
+    CHECK mv_is_user_status <> abap_undefined.
+
+    DATA(object_types) = me->get_object_types( ).
+    DATA object_types_range TYPE RANGE OF j_obtyp.
+    object_types_range = VALUE #( FOR <object_type_for> IN object_types ( low = <object_type_for> option = 'EQ' sign = 'I' ) ).
+
+    " subclass did not override get_object_types, or purposefully opts out of pre-lookup
+    CHECK object_types IS NOT INITIAL.
+
+    IF mv_is_user_status = abap_true.
+      " user status
+      SELECT estat AS statuscode, tj30t~stsma AS statusprofile FROM tj30t "#EC CI_BUFFJOIN
+        INNER JOIN tj21 ON tj21~stsma = tj30t~stsma
+        WHERE txt04 = @iv_statusname
+          AND spras = @sy-langu
+          AND tj30t~stsma IN @gt_statusprofile_ranges
+          AND tj21~obtyp IN @object_types_range INTO CORRESPONDING FIELDS OF TABLE @result.
+       IF sy-subrc = 0
+        AND lines( gt_statusprofile_ranges ) = 1
+        AND line_exists( gt_statusprofile_ranges[ option = 'EQ' sign = 'I' ] ).
+         "exclusively looking for one profile only - this comparison will happen on order header level.
+         MODIFY result FROM VALUE #( statusprofile = '' ) TRANSPORTING statusprofile WHERE statusprofile IS NOT INITIAL.
+       ENDIF.
+    ELSE.
+      " system status
+    DATA(imch_status) = cl_ieqm_factory=>get_imch_status( ).
+    LOOP AT object_types ASSIGNING FIELD-SYMBOL(<object_type>).
+      DATA(status_codes) = imch_status->get_system_status_for_object( <object_type> ).
+
+      LOOP AT status_codes ASSIGNING FIELD-SYMBOL(<status_code>) WHERE statusshortname = iv_statusname.
+          APPEND VALUE #( statuscode = <status_code>-statuscode ) TO result.
+        ENDLOOP.
+      ENDLOOP.
+    ENDIF.
+
+    SORT result.
+    DELETE ADJACENT DUPLICATES FROM result.
+  ENDMETHOD.
+
+
+  METHOD get_object_types.
+    " must be implemented by subclasses to use the pre-lookup
+  ENDMETHOD.
+
+
+  METHOD if_sadl_exit_calc_element_read~calculate.
+
+    DATA:
+      lv_is_requested_syststatus TYPE abap_bool,
+      lv_is_requested_userstatus TYPE abap_bool,
+      ls_jsto                    TYPE jsto,
+      object_numbers             TYPE tt_objnr.
+
+    FIELD-SYMBOLS:
+      <lt_calculated_data>   TYPE INDEX TABLE,
+      <lt_original_data>     TYPE INDEX TABLE,
+
+      <lv_activesyststsname> TYPE any,
+      <lv_activeuserstsname> TYPE any.
+
+    DATA:
+      lv_system_status TYPE j_stext,
+      lv_user_status   TYPE j_stext.
+
+* Check importing parameters
+
+    IF it_original_data IS INITIAL.
+      RETURN.
+    ENDIF.
+
+    lv_is_requested_syststatus = boolc( line_exists( it_requested_calc_elements[ table_line = mv_comp_activesyststs ] ) ).
+    lv_is_requested_userstatus = boolc( line_exists( it_requested_calc_elements[ table_line = mv_comp_activeusersts ] ) ).
+
+    IF NOT ( lv_is_requested_syststatus EQ abap_true OR lv_is_requested_userstatus EQ abap_true ).
+      RETURN.
+    ENDIF.
+
+    DATA(lt_struct_comp) = CAST cl_abap_structdescr( CAST cl_abap_tabledescr( cl_abap_tabledescr=>describe_by_data( p_data = it_original_data ) )->get_table_line_type( ) )->get_symbols( ).
+
+    READ TABLE lt_struct_comp
+      WITH TABLE KEY name = mv_comp_statusobject
+      TRANSPORTING NO FIELDS.
+    IF sy-subrc NE 0.
+      RETURN.
+    ENDIF.
+
+    IF lv_is_requested_syststatus EQ abap_true.
+      READ TABLE lt_struct_comp
+        WITH TABLE KEY name = mv_comp_activesyststs
+        TRANSPORTING NO FIELDS.
+      IF sy-subrc NE 0.
+        RETURN.
+      ENDIF.
+    ENDIF.
+
+    IF lv_is_requested_userstatus EQ abap_true.
+      READ TABLE lt_struct_comp
+        WITH TABLE KEY name = mv_comp_activeusersts
+        TRANSPORTING NO FIELDS.
+      IF sy-subrc NE 0.
+        RETURN.
+      ENDIF.
+    ENDIF.
+
+
+
+    DATA(lr_original_data) = REF #( it_original_data ).
+    ASSIGN lr_original_data->* TO <lt_original_data>.
+
+    DATA(lr_calculated_data) = REF #( ct_calculated_data ).
+    ASSIGN lr_calculated_data->* TO <lt_calculated_data>.
+
+    LOOP AT <lt_original_data> ASSIGNING FIELD-SYMBOL(<ls_original_data>).
+      ASSIGN COMPONENT mv_comp_statusobject OF STRUCTURE <ls_original_data> TO FIELD-SYMBOL(<lv_statusobject>).
+      APPEND <lv_statusobject> TO object_numbers.
+    ENDLOOP.
+
+    cl_itob_factory=>get_itob_ustat_functions( )->status_pre_read(
+      EXPORTING
+        object_numbers    = object_numbers
+    ).
+
+    LOOP AT <lt_original_data> ASSIGNING <ls_original_data>.
+
+      ASSIGN COMPONENT mv_comp_statusobject OF STRUCTURE <ls_original_data> TO <lv_statusobject>.
+
+      READ TABLE <lt_calculated_data> ASSIGNING FIELD-SYMBOL(<ls_calculated_data>) INDEX sy-tabix.
+
+      ASSIGN COMPONENT mv_comp_statusobject OF STRUCTURE <ls_original_data> TO <lv_statusobject>.
+
+      IF <lv_statusobject> IS NOT INITIAL.
+        TEST-SEAM status_text_edit.
+*       Not required-- STATUS_TEXT_EDIT will raise an error for this rare case
+*       SELECT SINGLE * FROM jsto WHERE objnr = @<lv_statusobject> INTO @ls_jsto.
+*       IF sy-subrc <> 0.
+*         CONTINUE.
+*       ENDIF.
+
+          CALL FUNCTION 'STATUS_TEXT_EDIT'
+            EXPORTING
+              flg_user_stat = lv_is_requested_userstatus
+              objnr         = <lv_statusobject>
+              only_active   = 'X'
+              spras         = sy-langu
+            IMPORTING
+              line          = lv_system_status
+              user_line     = lv_user_status
+            EXCEPTIONS
+              error_message = 1
+              OTHERS        = 2.
+
+          IF sy-subrc <> 0.
+            CONTINUE.
+          ENDIF.
+        END-TEST-SEAM.
+      ENDIF.
+
+      IF lv_is_requested_syststatus EQ abap_true.
+        ASSIGN COMPONENT mv_comp_activesyststs OF STRUCTURE <ls_calculated_data> TO <lv_activesyststsname>.
+        <lv_activesyststsname> = lv_system_status.
+      ENDIF.
+      IF lv_is_requested_userstatus EQ abap_true.
+        ASSIGN COMPONENT mv_comp_activeusersts OF STRUCTURE <ls_calculated_data> TO <lv_activeuserstsname>.
+        <lv_activeuserstsname> = lv_user_status.
+      ENDIF.
+
+    ENDLOOP.
+
+
+  ENDMETHOD.
+
+
+  METHOD if_sadl_exit_calc_element_read~get_calculation_info.
+
+    " Must be implemented in the child.
+
+  ENDMETHOD.
+
+
+  METHOD if_sadl_exit_filter_transform~map_atom.
+
+    DATA:
+      lv_element_w_path        TYPE sadl_entity_element,
+      lv_lambda                TYPE string,
+      lv_element_w_lambda_path TYPE string.
+
+    lv_lambda                = to_upper( substring( val = mv_assoc_activeststxt off = 1 ) ).
+    lv_element_w_lambda_path = lv_lambda && '.STATUSSHORTNAME'.
+    lv_element_w_path        = mv_assoc_activeststxt && '.STATUSSHORTNAME'.
+
+    DATA(lo_cfac) = cl_sadl_cond_prov_factory_pub=>create_simple_cond_factory( ).
+
+    DATA(operator_adjusted) = iv_operator.
+    DATA(value_adjusted) = iv_value.
+    IF operator_adjusted = if_sadl_exit_filter_transform~co_operator-covers_pattern
+     AND strlen( iv_value ) = 6
+     AND iv_value(1) = '*'
+     AND iv_value+5 = '*'
+     AND iv_value+1(4) NS '*'.
+     operator_adjusted = if_sadl_exit_filter_transform~co_operator-equals.
+     value_adjusted = iv_value+1(4).
+   ENDIF.
+
+    CASE operator_adjusted.
+      WHEN if_sadl_exit_filter_transform~co_operator-equals .
+        IF condense( val = iv_value ) = ''.
+          ro_condition = lo_cfac->element( lv_lambda && '.STATUSCODE' )->is_null( )->exists( iv_name = lv_lambda iv_path = mv_assoc_activeststxt ).
+        ELSEIF strlen( value_adjusted ) > 4 .
+          ro_condition = lo_cfac->false( ).
+        ELSE.
+          DATA(statuscodes) = me->determine_statuscode_from_name( CONV #( value_adjusted ) ).
+          DATA conditions TYPE REF TO if_sadl_cond_provider_generic .
+          LOOP AT statuscodes ASSIGNING FIELD-SYMBOL(<statuscode_lookup>).
+            IF <statuscode_lookup>-statusprofile IS INITIAL.
+              DATA(conditions_local) = lo_cfac->element( lv_lambda && '.STATUSCODE' )->equals( <statuscode_lookup>-statuscode ).
+            ELSE.
+              conditions_local = lo_cfac->element( lv_lambda && '.STATUSCODE' )->equals( <statuscode_lookup>-statuscode )->and( io_condition = lo_cfac->element( lv_lambda && '.STATUSPROFILE' )->equals( <statuscode_lookup>-statusprofile ) ).
+            ENDIF.
+            IF conditions IS BOUND.
+              conditions = conditions->or( conditions_local ).
+            ELSE.
+              conditions = conditions_local.
+            ENDIF.
+          ENDLOOP.
+
+          IF statuscodes IS INITIAL
+           OR conditions IS NOT BOUND.
+            " Lookup did not yield anything - Fallback to slow query
+            ro_condition = lo_cfac->element( lv_element_w_lambda_path )->equals( value_adjusted )->exists( iv_name = lv_lambda iv_path = mv_assoc_activeststxt ).
+          ELSE.
+            ro_condition = conditions->exists( iv_name = lv_lambda iv_path = mv_assoc_activeststxt ).
+          ENDIF.
+        ENDIF.
+      WHEN if_sadl_exit_filter_transform~co_operator-covers_pattern.
+        ro_condition = lo_cfac->element( lv_element_w_lambda_path )->covers_pattern( iv_value )->exists( iv_name = lv_lambda iv_path = mv_assoc_activeststxt ).
+      WHEN if_sadl_exit_filter_transform~co_operator-greater_than.
+        ro_condition = lo_cfac->element( lv_element_w_lambda_path )->greater_than( iv_value )->exists( iv_name = lv_lambda iv_path = mv_assoc_activeststxt ).
+      WHEN if_sadl_exit_filter_transform~co_operator-less_than.
+        ro_condition = lo_cfac->element( lv_element_w_lambda_path )->less_than( iv_value )->exists( iv_name = lv_lambda iv_path = mv_assoc_activeststxt ).
+      WHEN if_sadl_exit_filter_transform~co_operator-is_null.
+        ro_condition = lo_cfac->element( lv_element_w_path )->is_null( ).
+      WHEN OTHERS.
+        ro_condition = lo_cfac->false( ).
+    ENDCASE.
+
+  ENDMETHOD.
+
+
+  METHOD set_assoc.
+
+    mv_assoc_activeststxt = iv_assoc_activeststxt.
+    mv_is_user_status = iv_is_user_status.
+
+  ENDMETHOD.
+
+
+  METHOD set_comp.
+
+
+    mv_comp_activesyststs = iv_comp_activesyststs.
+    mv_comp_activeusersts = iv_comp_activeusersts.
+    mv_comp_statusobject = iv_comp_statusobject.
+
+    INSERT mv_comp_statusobject INTO TABLE et_requested_orig_elements.
+
+
+  ENDMETHOD.
+
+
+  METHOD set_statusprofiles.
+    gt_statusprofile_ranges = CORRESPONDING #( statusprofile_ranges ).
+  ENDMETHOD.
+ENDCLASS.
