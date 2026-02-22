@@ -1,0 +1,312 @@
+class /ETN/CL_PM_VDM_STAT_ORDER definition
+  public
+  final
+  create public .
+
+public section.
+
+  interfaces IF_SADL_EXIT .
+  interfaces IF_SADL_EXIT_FILTER_TRANSFORM .
+  interfaces IF_SADL_EXIT_CALC_ELEMENT_READ .
+  INTERFACES if_amdp_marker_hdb.
+
+   class-methods get_concat_user_status for table function /ETN/TF_ORDER_USR_STATUS.
+   class-methods get_concat_system_status for table function /ETN/TF_ORDER_SYS_STATUS.
+   class-methods get_order_list for table function /ETN/TF_ORDER_LIST.
+                                                                .
+protected section.
+private section.
+ENDCLASS.
+
+
+
+CLASS /ETN/CL_PM_VDM_STAT_ORDER IMPLEMENTATION.
+
+
+  method if_sadl_exit_calc_element_read~calculate.
+* ****************************************************************************************
+* EAMR Project    - User story:EAMR-7893: EAMR-2735-IH-Cockpit-Status (AC)             *
+* ---------------------------------------------------------------------------------------*
+*For Process flow interface-Service for first screen to list the process                 *
+* area details to front end                                                              *
+******************************************************************************************
+* Change history:                                                                        *
+*   Date       User    Ver      Reason                                    Request        *
+* ----------------------------------------------------------------------------------------
+* 18.12.2023   M73909 V01.0    IH - AC Anzeigereihenfolge Systemstatus    YEOK901085     *
+*----------------------------------------------------------------------------------------*
+* 30.10.2024   N16951 V01.1    Defect 9300006772 Performance Massnr/Order DEOK9A04HT     *
+******************************************************************************************
+
+  "-----------------------------------------------------------------------------"
+    "--- Start of calculation for status fields in view /ETN/I_MEASURE_ORDER  ----"
+    "-----------------------------------------------------------------------------"
+    if line_exists(  it_requested_calc_elements[  table_line = 'ORDERSYSTEMSTATUS' ] ) or
+       line_exists(  it_requested_calc_elements[  table_line = 'ORDERUSERSTATUS' ] ).
+
+      data: lt_order_req  type table of /etn/i_measure_order,
+            lv_objnr_jest type j_objnr,
+            lv_sysstatus  type bsvx-sttxt,
+            lv_usrstatus  type bsvx-sttxt.
+
+      "set requested data from it_original_data
+      lt_order_req = corresponding #( it_original_data ).
+
+      if lt_order_req is not initial.
+
+        loop at lt_order_req assigning field-symbol(<ls_order_req>).
+
+          "quick check if objnr is set -> if not -> dump in fuba
+          lv_objnr_jest = <ls_order_req>-objectkey.
+          if lv_objnr_jest cs 'OR'.
+
+            " get concatenated system and user statuses (only active statuses are selected)
+            call function 'STATUS_TEXT_EDIT'
+              exporting
+                objnr            = lv_objnr_jest
+                spras            = sy-langu
+                flg_user_stat    = abap_true
+              importing
+                line             = lv_sysstatus
+                user_line        = lv_usrstatus
+              exceptions
+                object_not_found = 1.
+            if sy-subrc = 0.
+              "set status for view
+              <ls_order_req>-ordersystemstatus = lv_sysstatus.
+              <ls_order_req>-orderusertatus    = lv_usrstatus.
+            endif.
+          endif.
+          clear: lv_sysstatus, lv_usrstatus, lv_objnr_jest.
+        endloop.
+        if lt_order_req is not initial.
+          ct_calculated_data =  corresponding #( lt_order_req ).
+        else.
+          ct_calculated_data = corresponding #( it_original_data ).
+        endif.
+      endif.
+    endif.
+    "--- End of calculation for view fields in /ETN/I_MEASURE_ORDER  ----"
+
+
+
+    "----------------------------------------------------------------------------------------------------"
+    "--- Start of calculation for status fields in view /ETN/C_AC_ORDER_LIST and /ETN/C_ORDER_SH_EXT ----"
+    "----------------------------------------------------------------------------------------------------"
+
+    if line_exists( it_requested_calc_elements[  table_line = 'USERSTATUS' ] ) or
+       line_exists( it_requested_calc_elements[  table_line = 'SYSTEM_STATUS' ] ) or
+       line_exists( it_requested_calc_elements[  table_line = 'USERSTATUSINTERN' ] ) or
+       line_exists( it_requested_calc_elements[  table_line = 'SYSTEMSTATUSINTERN' ] ).
+       .
+
+      data: lt_ac_order_list type table of /etn/c_ac_order_list,
+            lt_ac_order_stat type table of /etn/c_ac_order_list,
+            lv_ac_objnr_jest type j_objnr,
+            lv_ac_sysstatus  type bsvx-sttxt,
+            lv_ac_usrstatus  type bsvx-sttxt.
+
+
+      "set requested data from it_original_data
+      lt_ac_order_list = corresponding #( it_original_data ).
+
+
+       data(lr_order_sys_stat) = value rseloption( for <ls_sysstat> in lt_ac_order_list  ( sign = 'I' option = 'EQ' low = <ls_sysstat>-orderid ) ).
+       data(lr_objnr_usr_stat) = value rseloption( for <ls_usrstat>  in lt_ac_order_list ( sign = 'I' option = 'EQ' low = <ls_usrstat>-ObjectKey  ) ).
+
+            "-------------------------"
+            "-- Concat Systemstatus --"
+            "-------------------------"
+            if lr_order_sys_stat is not initial.
+                select from /etn/i_order_system_status
+                    fields  orderid,
+                      string_agg( systemstatus, ' ' ORDER BY systemstatus ) as systemstatusintern
+                    where orderid in @lr_order_sys_stat
+                    group by orderid
+                    into table @data(lt_head_sysstatus).
+                        if sy-subrc = 0.
+                            DATA(lt_sysstatus) = lt_head_sysstatus.
+                        endif.
+            endif. "system status
+
+            "-----------------------------"
+            "-- Concatenate Userstatus ---"
+            "-----------------------------"
+            if lr_objnr_usr_stat is not initial.
+
+             select statusobjectkey,
+                  STRING_AGG( Userstatus, ' ' ORDER BY userstatus ) as userstatusintern
+                        from /ETN/I_ACT_USR_STAT
+                          where statusobjectkey in @lr_objnr_usr_stat
+                          GROUP BY statusobjectkey
+                          into table @data(lt_head_usrstatus).
+                              if sy-subrc = 0.
+                                  DATA(lt_usrstatus) = lt_head_usrstatus.
+                             endif.
+           endif.
+
+
+
+     "-----------------------------------------------"
+     "-- Get System-/Userstatus in Systemlanguage ---"
+     "-----------------------------------------------"
+     if lt_ac_order_list is not initial.
+
+        loop at lt_ac_order_list assigning field-symbol(<ls_order_list>).
+
+          "add concatenated system-/userstatus
+          <ls_order_list>-SystemStatusIntern = value #( lt_sysstatus[ orderid = <ls_order_list>-OrderID ]-systemstatusintern         default '').
+          <ls_order_list>-UserStatusIntern   = value #( lt_usrstatus[ StatusObjectKey = <ls_order_list>-ObjectKey ]-userstatusintern default '').
+
+          "quick check if objnr is set -> if not -> dump in fuba
+          lv_ac_objnr_jest = <ls_order_list>-objectkey.
+          if <ls_order_list>-objectkey is initial and <ls_order_list>-orderid is not initial.
+            lv_ac_objnr_jest = 'OR' && <ls_order_list>-orderid.
+          endif.
+
+          if lv_ac_objnr_jest cs 'OR'.
+            " get concatenated system and user statuses (only active statuses are selected)
+            call function 'STATUS_TEXT_EDIT'
+              exporting
+                objnr            = lv_ac_objnr_jest
+                spras            = sy-langu
+                flg_user_stat    = abap_true
+              importing
+                line             = lv_ac_sysstatus
+                user_line        = lv_ac_usrstatus
+              exceptions
+                object_not_found = 1.
+            if sy-subrc = 0.
+              "set status for view
+              <ls_order_list>-system_status = lv_ac_sysstatus.
+              <ls_order_list>-userstatus    = lv_ac_usrstatus.
+            endif.
+          endif.
+          clear: lv_ac_sysstatus, lv_ac_usrstatus, lv_ac_objnr_jest.
+        endloop.
+      endif.
+
+
+     "--------------------------"
+     "-- set calculated data  --"
+     "--------------------------"
+     if lt_ac_order_list is not initial.
+         ct_calculated_data =  corresponding #( lt_ac_order_list ).
+     else.
+        ct_calculated_data = corresponding #( it_original_data ).
+     endif.
+   endif.  "end of status intern
+
+
+
+    "--- End of calculation for view fields in /ETN/C_AC_ORDER_LIST  ----"
+
+
+
+  endmethod.
+
+
+  method if_sadl_exit_calc_element_read~get_calculation_info ##NEEDED.
+    if iv_entity = '/ETN/C_AC_ORDER_LIST'.
+        append 'OBJECTKEY' to et_requested_orig_elements.
+    endif.
+  endmethod.
+
+
+  METHOD if_sadl_exit_filter_transform~map_atom.
+    if iv_entity = '/ETN/C_AC_ORDER_LIST'.
+
+     if iv_element = 'TASKLISTGROUP'.
+      data(lo_tasklistgroup)     = cl_sadl_cond_prov_factory_pub=>create_simple_cond_factory( )->element( '_TASKLIST.TASKLISTGROUP' ).
+      data(lo_exit_test) = cl_ccv_scenario_exit_factory=>get_instance( )->get_scenario_exit( conv #( iv_value ) ).
+      data(lt_filter_test) = lo_exit_test->filter_aggregation( ).
+      ro_condition = lo_tasklistgroup->equals( iv_value ).
+     endif.
+     if iv_element = 'TASKLISTGROUPCOUNTER'.
+      data(lo_counter)   = cl_sadl_cond_prov_factory_pub=>create_simple_cond_factory( )->element( '_TASKLIST.TASKLISTGROUPCOUNTER' ).
+      lo_exit_test = cl_ccv_scenario_exit_factory=>get_instance( )->get_scenario_exit( conv #( iv_value ) ).
+      lt_filter_test = lo_exit_test->filter_aggregation( ).
+      ro_condition = lo_counter->equals( iv_value ).
+     endif.
+
+      if iv_element = 'SYSTEM_STATUS'.
+        data(lv_syststatus) =  cl_sadl_cond_prov_factory_pub=>create_simple_cond_factory( )->element( '_SYSCONCAT.SYSTEM_STATUS' ).
+        data(lo_exit) = cl_ccv_scenario_exit_factory=>get_instance( )->get_scenario_exit( conv #( iv_value )  ).
+        data(lt_filter) = lo_exit->filter_aggregation(  ).
+        data(lv_wert) = |*| && iv_value && |*|.
+        ro_condition = lv_syststatus->covers_pattern( lv_wert ).
+      endif.
+    
+    
+    if iv_element = 'USERSTATUS'.
+      data(lv_userstatus) = cl_sadl_cond_prov_factory_pub=>create_simple_cond_factory( )->element( '_USRCONCAT.USERSTATUS' ).
+      lo_exit = cl_ccv_scenario_exit_factory=>get_instance( )->get_scenario_exit( conv #( iv_value )  ).
+      lt_filter = lo_exit->filter_aggregation(  ).
+      lv_wert = |*| && iv_value && |*|.
+      ro_condition = lv_userstatus->covers_pattern( lv_wert ).
+    endif.
+
+    if iv_element = 'PARTNERFUNCTION'.
+      data(lv_partnerfunction) = cl_sadl_cond_prov_factory_pub=>create_simple_cond_factory( )->element( '_PARTNER.PARTNERCONCAT' ).
+      lo_exit = cl_ccv_scenario_exit_factory=>get_instance( )->get_scenario_exit( conv #( iv_value )  ).
+      lt_filter = lo_exit->filter_aggregation(  ).
+      lv_wert = |*| && iv_value && |*|.
+      ro_condition = lv_partnerfunction->covers_pattern( iv_value ).
+    endif.
+   endif.
+   if iv_entity = '/ETN/C_ORDER_SH_EXT'.
+     if iv_element = 'SYSTEM_STATUS'.
+        lv_syststatus =  cl_sadl_cond_prov_factory_pub=>create_simple_cond_factory( )->element( '_SYSCONCAT.SYSTEM_STATUS' ).
+        lo_exit = cl_ccv_scenario_exit_factory=>get_instance( )->get_scenario_exit( conv #( iv_value )  ).
+        lt_filter = lo_exit->filter_aggregation(  ).
+        lv_wert = |*| && iv_value && |*|.
+        ro_condition = lv_syststatus->covers_pattern( lv_wert ).
+      endif.
+
+    if iv_element = 'USERSTATUS'.
+      lv_userstatus = cl_sadl_cond_prov_factory_pub=>create_simple_cond_factory( )->element( '_USRCONCAT.USERSTATUS' ).
+      lo_exit = cl_ccv_scenario_exit_factory=>get_instance( )->get_scenario_exit( conv #( iv_value )  ).
+      lt_filter = lo_exit->filter_aggregation(  ).
+      lv_wert = |*| && iv_value && |*|.
+      ro_condition = lv_userstatus->covers_pattern( lv_wert ).
+    endif.
+   endif.
+  ENDMETHOD.
+
+
+  METHOD GET_CONCAT_SYSTEM_STATUS by database function for hdb language sqlscript options read-only using /ETN/I_SYS_STAT_CHECK.
+
+   return select :clnt as Mandt,
+                 OrderID,
+                 string_agg( systemstatus, '  ' order by sys.systemstatus) as System_Status
+                 from "/ETN/I_SYS_STAT_CHECK" as sys
+                 group by OrderID;
+
+  ENDMETHOD.
+
+
+  METHOD GET_CONCAT_USER_STATUS by database function for hdb language sqlscript options read-only using /ETN/I_USR_STAT_CHECK.
+
+    return select :clnt as Mandt,
+                  ObjectKey,
+                  string_agg( userstatus, '  ' ) as UserStatus
+                 from "/ETN/I_USR_STAT_CHECK" as usr
+                  group by ObjectKey;
+
+  ENDMETHOD.
+
+
+  METHOD GET_ORDER_LIST by database function for hdb language sqlscript options read-only using /ETN/I_AC_ORDER_LIST /ETN/I_SYS_STAT_CHECK.
+
+    return select :clnt as Mandt,
+                  head.OrderId,
+                  head.ObjectKey,
+                  string_agg( systemstatus, ' ' ) as SystemStatus
+                  from "/ETN/I_AC_ORDER_LIST" as head
+                    inner join "/ETN/I_SYS_STAT_CHECK" as sysstatus
+                           on head.objectkey = sysstatus.objectkey
+                  group by head.OrderId, head.ObjectKey;
+
+
+  ENDMETHOD.
+ENDCLASS.

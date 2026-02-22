@@ -1,0 +1,61 @@
+CLASS cl_sadl_cond_prov_factory_pub DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PUBLIC .
+
+  PUBLIC SECTION.
+    "! Creates an empty condition provider. Use its methods CONDITION, EQUALS, and IN_RANGE to create conditions. Their returning parameter RO_CONDITION has
+    "! operator-type methods AND and OR, which you can use to to link conditions
+    CLASS-METHODS create_basic_condition_factory
+      RETURNING VALUE(ro_factory) TYPE REF TO if_sadl_basic_condition_factry.
+
+    "! Creates a condition provider for authorization objects. Add the authorization objects to be checked using the add_authorization_for_object method on this object
+    CLASS-METHODS create_for_authorization
+      RETURNING VALUE(ro_provider) TYPE REF TO if_sadl_cond_prov_auth_objects.
+
+    "! Creates a condition provider for authorization objects. Add the authorization objects to be checked using the add_authorization_conditions method on this object.
+    "! For each added authorization object, the conditions under which the check should be applied can be specified as name-range pairs using the constraints parameter
+    CLASS-METHODS create_for_constrained_auths
+      RETURNING VALUE(ro_provider) TYPE REF TO if_sadl_cond_prov_auth_constr.
+
+    "! Creates a condition provider which does not perform any authorization check.
+    CLASS-METHODS create_for_no_authority_check
+      RETURNING VALUE(ro_provider) TYPE REF TO if_sadl_cond_provider_auths.
+
+    "! Creates simple condition factory for easy condition building
+    CLASS-METHODS create_simple_cond_factory
+      RETURNING VALUE(ro_factory) TYPE REF TO if_sadl_simple_cond_factory.
+
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+ENDCLASS.
+
+
+
+CLASS CL_SADL_COND_PROV_FACTORY_PUB IMPLEMENTATION.
+
+
+  METHOD create_basic_condition_factory.
+    ro_factory = cl_sadl_condition_provdr_fctry=>create_basic_condition_factory( ).
+  ENDMETHOD.
+
+
+  METHOD create_for_authorization.
+    ro_provider = cl_sadl_condition_provdr_fctry=>create_for_authorization( ).
+  ENDMETHOD.
+
+
+  METHOD create_for_constrained_auths.
+    ro_provider = cl_sadl_condition_provdr_fctry=>create_for_constrained_auths( ).
+  ENDMETHOD.
+
+
+  METHOD create_for_no_authority_check.
+    ro_provider = cl_sadl_condition_provdr_fctry=>create_for_no_authority_check( ).
+  ENDMETHOD.
+
+
+  METHOD create_simple_cond_factory.
+    ro_factory = cl_sadl_condition_provdr_fctry=>create_simple_cond_factory( ).
+  ENDMETHOD.
+ENDCLASS.

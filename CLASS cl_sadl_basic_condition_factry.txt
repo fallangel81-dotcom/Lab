@@ -1,0 +1,45 @@
+CLASS cl_sadl_basic_condition_factry DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PRIVATE
+  GLOBAL FRIENDS cl_sadl_condition_provdr_fctry.
+
+  PUBLIC SECTION.
+    INTERFACES if_sadl_basic_condition_factry.
+
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+ENDCLASS.
+
+
+
+CLASS CL_SADL_BASIC_CONDITION_FACTRY IMPLEMENTATION.
+
+
+  METHOD if_sadl_basic_condition_factry~condition.
+*    ro_condition = NEW lcl_simple_condition( attribute_name = name  operator = operator low = low high = high ).
+    DATA lt_condition TYPE if_sadl_query_engine_types=>tt_complex_condition.
+    cl_sadl_condition_generator=>append_sadl_condition( EXPORTING iv_attribute = name
+                                                                  iv_option    = operator
+                                                                  iv_low       = low
+                                                                  iv_high      = high
+                                                        CHANGING  ct_sadl_conditions = lt_condition ).
+    ro_condition = NEW cl_sadl_cond_provider_generic( lt_condition ).
+  ENDMETHOD.
+
+
+  METHOD if_sadl_basic_condition_factry~equals.
+    ro_condition = if_sadl_basic_condition_factry~condition( name = name  operator = if_sadl_basic_condition_factry=>co_operator-eq  low = value ).
+  ENDMETHOD.
+
+
+  METHOD if_sadl_basic_condition_factry~in_range.
+*    ro_condition = NEW lcl_range_condition( attribute_name = name  t_ranges = t_ranges ).
+    cl_sadl_condition_generator=>convert_ranges_to_conditions(
+        EXPORTING it_ranges     = VALUE #( ( column_name = name
+                                             field_path  = name
+                                             t_selopt    = CORRESPONDING #( t_ranges ) ) )
+        IMPORTING et_conditions = DATA(lt_sadl_condition) ).
+    ro_condition = NEW cl_sadl_cond_provider_generic( lt_sadl_condition ).
+  ENDMETHOD.
+ENDCLASS.

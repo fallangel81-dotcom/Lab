@@ -1,0 +1,503 @@
+CLASS cl_sadl_condition_util DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PUBLIC .
+
+  PUBLIC SECTION.
+
+    CLASS-METHODS add_condition IMPORTING it_condition TYPE if_sadl_types=>tt_complex_condition
+                                CHANGING  ct_condition TYPE if_sadl_types=>tt_complex_condition.
+
+    CLASS-METHODS add_or_condition IMPORTING it_condition TYPE if_sadl_types=>tt_complex_condition
+                                   CHANGING  ct_condition TYPE if_sadl_types=>tt_complex_condition.
+
+    CLASS-METHODS add_equals_value  IMPORTING iv_attribute      TYPE string
+                                              iv_value          TYPE string
+                                              iv_attribute_type TYPE string DEFAULT if_sadl_types=>co_cond_token_type-attribute
+                                    CHANGING  ct_condition      TYPE if_sadl_types=>tt_complex_condition.
+
+    CLASS-METHODS get_condition_for_keys  IMPORTING it_keys             TYPE if_sadl_public_types=>tt_parameters
+                                          RETURNING VALUE(rt_condition) TYPE if_sadl_types=>tt_complex_condition.
+
+    CLASS-METHODS add_condition_for_keys  IMPORTING it_keys      TYPE if_sadl_public_types=>tt_parameters
+                                          CHANGING  ct_condition TYPE if_sadl_types=>tt_complex_condition.
+
+    CLASS-METHODS src_equals_trg IMPORTING source_element      TYPE string
+                                           target_element      TYPE string
+                                 RETURNING VALUE(rt_condition) TYPE if_sadl_types=>tt_complex_condition.
+
+    CLASS-METHODS target_equals_value  IMPORTING target_element      TYPE string
+                                                 value               TYPE string
+                                       RETURNING VALUE(rt_condition) TYPE if_sadl_types=>tt_complex_condition.
+
+    CLASS-METHODS target_equals_placeholder  IMPORTING target_element      TYPE string
+                                                       placeholder         TYPE string
+                                             RETURNING VALUE(rt_condition) TYPE if_sadl_types=>tt_complex_condition.
+
+    CLASS-METHODS condense_condition IMPORTING it_complex_condition   TYPE if_sadl_public_types=>tt_complex_condition
+                                     EXPORTING et_condensed_condition TYPE if_sadl_public_types=>tt_condensed_condition.
+    CLASS-METHODS expand_condition IMPORTING it_condensed_condition      TYPE if_sadl_public_types=>tt_condensed_condition
+                                   RETURNING VALUE(rt_complex_condition) TYPE if_sadl_public_types=>tt_complex_condition.
+
+    CLASS-METHODS ensure_unique_lambda CHANGING ct_complex_condition TYPE if_sadl_query_types=>tt_complex_condition.
+
+    CLASS-METHODS false_condition RETURNING VALUE(rt_condition) TYPE if_sadl_types=>tt_complex_condition.
+    CLASS-METHODS true_condition RETURNING VALUE(rt_condition) TYPE if_sadl_types=>tt_complex_condition.
+
+    CLASS-METHODS get_equal_elements_from_cond
+      IMPORTING
+        it_condition                   TYPE if_sadl_types=>tt_complex_condition
+      EXPORTING
+        ev_all_source_elems_have_targt TYPE abap_bool
+        et_remaining_condition         TYPE if_sadl_types=>tt_complex_condition
+        et_equal_elements              TYPE if_sadl_types=>tt_src_and_trg_element_pairs.
+
+    CLASS-METHODS get_equal_param_and_elem_cond
+      IMPORTING
+        it_condition                TYPE if_sadl_types=>tt_complex_condition
+      EXPORTING
+        ev_all_param_and_elem_conds TYPE abap_bool
+        et_remaining_condition      TYPE if_sadl_types=>tt_complex_condition
+        et_equal_param_and_elem     TYPE if_sadl_types=>tt_param_and_element_pairs.
+
+    CLASS-METHODS get_bound_target_elements IMPORTING it_condition       TYPE if_sadl_types=>tt_complex_condition
+                                            RETURNING VALUE(rt_elements) TYPE if_sadl_types=>tt_sorted_strings.
+
+    CLASS-METHODS turn_join_condition_direction IMPORTING it_condition        TYPE if_sadl_types=>tt_complex_condition
+                                                RETURNING VALUE(rt_condition) TYPE if_sadl_types=>tt_complex_condition.
+
+  PROTECTED SECTION.
+  PRIVATE SECTION.
+
+    TYPES tt_of_i TYPE TABLE OF i WITH EMPTY KEY.
+    CLASS-DATA gv_count TYPE i.
+
+    CONSTANTS gc_cond LIKE if_sadl_query_engine_types=>co_condition_types VALUE if_sadl_query_engine_types=>co_condition_types.
+
+    CLASS-METHODS sadl_to_range IMPORTING iv_operator TYPE string RETURNING VALUE(rv_operator) TYPE string.
+    CLASS-METHODS range_to_sadl IMPORTING iv_operator TYPE string RETURNING VALUE(rv_operator) TYPE string.
+    CLASS-METHODS _expect
+      IMPORTING
+        is_token TYPE if_sadl_public_types=>ty_complex_condition
+        iv_type  LIKE if_sadl_query_engine_types=>co_condition_types-attribute.
+    CLASS-METHODS _get_remaining_condition
+      IMPORTING
+        io_condition                  TYPE REF TO cl_sadl_condition_analyzer
+        it_operators_with_map         TYPE cl_sadl_condition_util=>tt_of_i
+      RETURNING
+        VALUE(rt_remaining_condition) TYPE if_sadl_types=>tt_complex_condition
+      RAISING
+        cx_sadl_bad_cond_replacements.
+
+    CLASS-METHODS _get_bound_elements IMPORTING it_condition       TYPE if_sadl_types=>tt_complex_condition
+                                                iv_type            TYPE if_sadl_types=>ty_complex_condition-type
+                                      RETURNING VALUE(rt_elements) TYPE if_sadl_types=>tt_sorted_strings.
+ENDCLASS.
+
+
+
+CLASS CL_SADL_CONDITION_UTIL IMPLEMENTATION.
+
+
+  METHOD add_condition.
+    IF it_condition IS NOT INITIAL.
+      APPEND LINES OF it_condition TO ct_condition.
+      IF lines( ct_condition ) > lines( it_condition ).
+        APPEND VALUE #( type = gc_cond-and ) TO ct_condition.
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD add_condition_for_keys.
+    LOOP AT it_keys ASSIGNING FIELD-SYMBOL(<s_key>).
+      add_equals_value( EXPORTING iv_attribute = <s_key>-name
+                                  iv_value     = <s_key>-value
+                        CHANGING  ct_condition = ct_condition ).
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD add_equals_value.
+    APPEND VALUE #( type = gc_cond-simple_value  value     = iv_value ) TO ct_condition.
+    APPEND VALUE #( type = iv_attribute_type     attribute = iv_attribute ) TO ct_condition.
+    APPEND VALUE #( type = gc_cond-equals ) TO ct_condition.
+    IF lines( ct_condition ) > 3.
+      APPEND VALUE #( type = gc_cond-and ) TO ct_condition. " reversed polish notation...
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD add_or_condition.
+    IF it_condition IS NOT INITIAL.
+      APPEND LINES OF it_condition TO ct_condition.
+      IF lines( ct_condition ) > lines( it_condition ).
+        APPEND VALUE #( type = gc_cond-or ) TO ct_condition.
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD condense_condition.
+    FIELD-SYMBOLS <s_condensed> LIKE LINE OF et_condensed_condition.
+
+    CLEAR et_condensed_condition.
+    DATA(lv_cursor) = lines( it_complex_condition ).
+    WHILE lv_cursor > 0.
+      ASSIGN it_complex_condition[ lv_cursor ] TO FIELD-SYMBOL(<s_condition>).
+      INSERT VALUE #( operator = sadl_to_range( <s_condition>-type ) ) INTO et_condensed_condition INDEX 1 ASSIGNING <s_condensed>.
+      CASE <s_condition>-type.
+        WHEN gc_cond-is_null
+          OR gc_cond-not_is_null.
+          IF it_complex_condition[ lv_cursor ]-attribute IS INITIAL.
+            SUBTRACT 1 FROM lv_cursor.
+            _expect( is_token = it_complex_condition[ lv_cursor ]  iv_type = gc_cond-attribute ).
+          ENDIF.
+          <s_condensed>-element = it_complex_condition[ lv_cursor ]-attribute.
+          SUBTRACT 1 FROM lv_cursor.
+
+        WHEN gc_cond-equals
+          OR gc_cond-not_equal
+          OR gc_cond-greater_than
+          OR gc_cond-greater_than_or_equal
+          OR gc_cond-less_than
+          OR gc_cond-less_than_or_equal
+          OR gc_cond-contains_pattern
+          OR gc_cond-not_contains_pattern.
+          IF it_complex_condition[ lv_cursor ]-attribute IS INITIAL.
+            SUBTRACT 1 FROM lv_cursor.
+            _expect( is_token = it_complex_condition[ lv_cursor ]  iv_type = gc_cond-attribute ).
+          ENDIF.
+          <s_condensed>-element = it_complex_condition[ lv_cursor ]-attribute.
+          SUBTRACT 1 FROM lv_cursor.
+
+          IF NOT it_complex_condition[ lv_cursor ]-type = gc_cond-simple_value.
+            RAISE EXCEPTION NEW cx_sadl_filt_attr_to_attr_comp( ).
+          ENDIF.
+          <s_condensed>-low = it_complex_condition[ lv_cursor ]-value.
+          SUBTRACT 1 FROM lv_cursor.
+
+        WHEN gc_cond-between
+          OR gc_cond-not_between.
+          IF it_complex_condition[ lv_cursor ]-attribute IS INITIAL.
+            SUBTRACT 1 FROM lv_cursor.
+            _expect( is_token = it_complex_condition[ lv_cursor ]  iv_type = gc_cond-attribute ).
+          ENDIF.
+          <s_condensed>-element = it_complex_condition[ lv_cursor ]-attribute.
+          SUBTRACT 1 FROM lv_cursor.
+          _expect( is_token = it_complex_condition[ lv_cursor ]  iv_type = gc_cond-simple_value ).
+          <s_condensed>-high = it_complex_condition[ lv_cursor ]-value.
+          SUBTRACT 1 FROM lv_cursor.
+          _expect( is_token = it_complex_condition[ lv_cursor ]  iv_type = gc_cond-simple_value ).
+          <s_condensed>-low = it_complex_condition[ lv_cursor ]-value.
+          SUBTRACT 1 FROM lv_cursor.
+
+        WHEN gc_cond-and
+          OR gc_cond-or
+          OR gc_cond-not.
+          SUBTRACT 1 FROM lv_cursor.
+
+        WHEN OTHERS.
+          cx_sadl_unexpected_state=>raise_because( |CONDITION TOKEN { <s_condition>-type } NOT SUPPORTED| ).
+      ENDCASE.
+    ENDWHILE.
+  ENDMETHOD.
+
+
+  METHOD ensure_unique_lambda.
+    DATA lv_changed TYPE abap_bool.
+
+    CHECK line_exists( ct_complex_condition[ type = if_sadl_query_engine_types=>co_condition_types-exists ] ).
+    DATA(lo_analyzer) = cl_sadl_condition_analyzer=>create( EXPORTING it_sadl_condition           = ct_complex_condition
+                                                            IMPORTING ev_has_extracted_attributes = lv_changed ).
+    IF lv_changed = abap_true.
+      ct_complex_condition = lo_analyzer->get_tokens( ).
+    ENDIF.
+
+    LOOP AT ct_complex_condition ASSIGNING FIELD-SYMBOL(<s_exists>) WHERE type = if_sadl_query_engine_types=>co_condition_types-exists.
+      DATA(lv_to) = sy-tabix.
+      lo_analyzer->get_expression_range( EXPORTING iv_token_index = lv_to
+                                         IMPORTING ev_index_from  = DATA(lv_from) ).
+      gv_count += 1.
+      DATA(lv_unique_lambda) = |{ <s_exists>-value }#{ gv_count }|.
+      LOOP AT ct_complex_condition ASSIGNING FIELD-SYMBOL(<s_condition>) FROM lv_from TO lv_to - 1 WHERE attribute CS <s_exists>-value && '.'.
+        IF contains( val = <s_condition>-attribute  start = <s_exists>-value && '.' ).
+          DATA(lv_offset) = strlen( <s_exists>-value ).
+          <s_condition>-attribute = lv_unique_lambda && <s_condition>-attribute+lv_offset.
+        ENDIF.
+      ENDLOOP.
+      <s_exists>-value = lv_unique_lambda.
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD expand_condition.
+    DATA(lc_condition_types_value) = gc_cond-simple_value.
+    LOOP AT it_condensed_condition ASSIGNING FIELD-SYMBOL(<s_condensed>).
+      CASE <s_condensed>-operator.
+        WHEN 'NL' OR 'NN'.
+          APPEND VALUE #( type = gc_cond-attribute  attribute = <s_condensed>-element ) TO rt_complex_condition.
+        WHEN 'EQ' OR 'NE' OR 'GT' OR 'GE' OR 'LT' OR 'LE' OR 'CP' OR 'NP'.
+          APPEND VALUE #( type = lc_condition_types_value  value = <s_condensed>-low ) TO rt_complex_condition.
+          APPEND VALUE #( type = gc_cond-attribute  attribute = <s_condensed>-element ) TO rt_complex_condition.
+        WHEN 'BT' OR 'NB'.
+          APPEND VALUE #( type = lc_condition_types_value  value = <s_condensed>-low ) TO rt_complex_condition.
+          APPEND VALUE #( type = lc_condition_types_value  value = <s_condensed>-high ) TO rt_complex_condition.
+          APPEND VALUE #( type = gc_cond-attribute  attribute = <s_condensed>-element ) TO rt_complex_condition.
+        WHEN 'AND' OR 'OR' OR 'NOT'.
+        WHEN OTHERS.
+          cx_sadl_unexpected_state=>raise_because( |OPERATOR { <s_condensed>-operator } NOT SUPPORTED| ).
+      ENDCASE.
+      APPEND VALUE #( type = range_to_sadl( <s_condensed>-operator ) ) TO rt_complex_condition.
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD false_condition.
+    rt_condition = VALUE #( ( type = if_sadl_query_engine_types=>co_condition_types-false ) ).
+  ENDMETHOD.
+
+
+  METHOD get_bound_target_elements.
+    rt_elements = _get_bound_elements( it_condition = it_condition  iv_type = gc_cond-target_attribute ).
+  ENDMETHOD.
+
+
+  METHOD get_condition_for_keys.
+    LOOP AT it_keys ASSIGNING FIELD-SYMBOL(<s_key>).
+      add_equals_value( EXPORTING iv_attribute = <s_key>-name
+                                  iv_value     = <s_key>-value
+                        CHANGING  ct_condition = rt_condition ).
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD get_equal_elements_from_cond.
+    CLEAR: et_equal_elements, ev_all_source_elems_have_targt, et_remaining_condition.
+
+    IF it_condition IS INITIAL.
+      ev_all_source_elems_have_targt = abap_true.
+
+    ELSE.
+      DATA lv_source_attr_count TYPE i.
+      DATA lt_equal_operator_idxs TYPE tt_of_i.
+      ASSIGN if_sadl_query_engine_types=>co_condition_types TO FIELD-SYMBOL(<co_type>).
+
+      DATA(lo_condition) = cl_sadl_condition_analyzer=>create( it_condition ).
+      DATA(lt_tokens) = lo_condition->get_tokens( ).
+      LOOP AT lt_tokens ASSIGNING FIELD-SYMBOL(<s_source_attr>) WHERE type = <co_type>-source_attribute.
+        DATA(lv_source_attr_idx) = sy-tabix.
+        lv_source_attr_count += 1.
+        DATA(lv_operator_idx) = lo_condition->get_parent_operator_index( lv_source_attr_idx ).
+        IF lt_tokens[ lv_operator_idx ]-type = <co_type>-equals
+            AND lo_condition->is_part_of_conjunction( lv_operator_idx ).
+          DATA(lv_second_operand_idx) = COND i( WHEN lv_source_attr_idx + 1 = lv_operator_idx
+                                                THEN lv_source_attr_idx - 1 ELSE lv_source_attr_idx + 1 ).
+          IF lt_tokens[ lv_second_operand_idx ]-type = <co_type>-target_attribute.
+            INSERT lv_operator_idx INTO TABLE lt_equal_operator_idxs.
+            INSERT VALUE #( source_element = <s_source_attr>-attribute
+                            target_element = lt_tokens[ lv_second_operand_idx ]-attribute ) INTO TABLE et_equal_elements.
+          ENDIF.
+        ENDIF.
+      ENDLOOP.
+
+      SORT                            et_equal_elements BY        source_element  target_element.
+      DELETE ADJACENT DUPLICATES FROM et_equal_elements COMPARING source_element  target_element.
+
+      IF lv_source_attr_count = lines( lt_equal_operator_idxs ).
+        ev_all_source_elems_have_targt = abap_true.
+      ENDIF.
+
+      IF et_remaining_condition IS SUPPLIED.
+        et_remaining_condition = _get_remaining_condition( io_condition          = lo_condition
+                                                           it_operators_with_map = lt_equal_operator_idxs ).
+      ENDIF.
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD get_equal_param_and_elem_cond.
+    CLEAR: et_equal_param_and_elem, ev_all_param_and_elem_conds, et_remaining_condition.
+
+    DATA lv_param_count TYPE i.
+    DATA lt_equal_operator_idxs TYPE tt_of_i.
+    ASSIGN if_sadl_query_engine_types=>co_condition_types TO FIELD-SYMBOL(<co_type>).
+
+    DATA(lo_condition) = cl_sadl_condition_analyzer=>create( it_condition ).
+    DATA(lt_tokens) = lo_condition->get_tokens( ).
+    LOOP AT lt_tokens ASSIGNING FIELD-SYMBOL(<s_parameter>) WHERE type = <co_type>-parameter.
+      DATA(lv_parameter_idx) = sy-tabix.
+      lv_param_count += 1.
+      DATA(lv_operator_idx) = lo_condition->get_parent_operator_index( lv_parameter_idx ).
+      IF lt_tokens[ lv_operator_idx ]-type = <co_type>-equals
+          AND lo_condition->is_part_of_conjunction( lv_operator_idx ).
+        DATA(lv_second_operand_idx) = COND i( WHEN lv_parameter_idx + 1 = lv_operator_idx
+                                              THEN lv_parameter_idx - 1
+                                              ELSE lv_parameter_idx + 1 ).
+        IF lt_tokens[ lv_second_operand_idx ]-type = <co_type>-attribute.
+          INSERT lv_operator_idx INTO TABLE lt_equal_operator_idxs.
+          INSERT VALUE #( parameter = <s_parameter>-attribute
+                          element = lt_tokens[ lv_second_operand_idx ]-attribute ) INTO TABLE et_equal_param_and_elem.
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+
+    SORT                            et_equal_param_and_elem BY        parameter  element.
+    DELETE ADJACENT DUPLICATES FROM et_equal_param_and_elem COMPARING parameter  element.
+
+    IF lv_param_count = lines( lt_equal_operator_idxs ).
+      ev_all_param_and_elem_conds = abap_true.
+    ENDIF.
+
+    IF et_remaining_condition IS SUPPLIED.
+      et_remaining_condition = _get_remaining_condition( io_condition          = lo_condition
+                                                         it_operators_with_map = lt_equal_operator_idxs ).
+    ENDIF.
+  ENDMETHOD.
+
+
+  METHOD range_to_sadl.
+    CASE iv_operator.
+      WHEN 'EQ'.    rv_operator = gc_cond-equals.
+      WHEN 'NE'.    rv_operator = gc_cond-not_equal.
+      WHEN 'GT'.    rv_operator = gc_cond-greater_than.
+      WHEN 'GE'.    rv_operator = gc_cond-greater_than_or_equal.
+      WHEN 'LT'.    rv_operator = gc_cond-less_than.
+      WHEN 'LE'.    rv_operator = gc_cond-less_than_or_equal.
+      WHEN 'CP'.    rv_operator = gc_cond-contains_pattern.
+      WHEN 'NP'.    rv_operator = gc_cond-not_contains_pattern.
+      WHEN 'BT'.    rv_operator = gc_cond-between.
+      WHEN 'NB'.    rv_operator = gc_cond-not_between.
+      WHEN 'NL'.    rv_operator = gc_cond-is_null.
+      WHEN 'NN'.    rv_operator = gc_cond-not_is_null.
+      WHEN 'AND'.   rv_operator = gc_cond-and.
+      WHEN 'OR'.    rv_operator = gc_cond-or.
+      WHEN 'NOT'.   rv_operator = gc_cond-not.
+      WHEN OTHERS.  rv_operator = iv_operator.
+    ENDCASE.
+  ENDMETHOD.
+
+
+  METHOD sadl_to_range.
+    CASE iv_operator.
+      WHEN gc_cond-equals.                 rv_operator = 'EQ'.
+      WHEN gc_cond-not_equal.              rv_operator = 'NE'.
+      WHEN gc_cond-greater_than.           rv_operator = 'GT'.
+      WHEN gc_cond-greater_than_or_equal.  rv_operator = 'GE'.
+      WHEN gc_cond-less_than.              rv_operator = 'LT'.
+      WHEN gc_cond-less_than_or_equal.     rv_operator = 'LE'.
+      WHEN gc_cond-contains_pattern.       rv_operator = 'CP'.
+      WHEN gc_cond-not_contains_pattern.   rv_operator = 'NP'.
+      WHEN gc_cond-between.                rv_operator = 'BT'.
+      WHEN gc_cond-not_between.            rv_operator = 'NB'.
+      WHEN gc_cond-is_null.                rv_operator = 'NL'.
+      WHEN gc_cond-not_is_null.            rv_operator = 'NN'.
+      WHEN gc_cond-and.                    rv_operator = 'AND'.
+      WHEN gc_cond-or.                     rv_operator = 'OR'.
+      WHEN gc_cond-not.                    rv_operator = 'NOT'.
+      WHEN OTHERS. rv_operator = iv_operator.
+    ENDCASE.
+  ENDMETHOD.
+
+
+  METHOD src_equals_trg.
+    APPEND VALUE #( type = gc_cond-source_attribute  attribute = source_element ) TO rt_condition.
+    APPEND VALUE #( type = gc_cond-target_attribute  attribute = target_element ) TO rt_condition.
+    APPEND VALUE #( type = gc_cond-equals ) TO rt_condition. " reversed polish notation...
+  ENDMETHOD.
+
+
+  METHOD target_equals_placeholder.
+    " placeholders: if_sadl_query_types=>co_system_variable_placeholder
+    APPEND VALUE #( type = gc_cond-placeholder       value     = placeholder ) TO rt_condition.
+    APPEND VALUE #( type = gc_cond-target_attribute  attribute = target_element ) TO rt_condition.
+    APPEND VALUE #( type = gc_cond-equals ) TO rt_condition. " reversed polish notation...
+  ENDMETHOD.
+
+
+  METHOD target_equals_value.
+    APPEND VALUE #( type = gc_cond-simple_value      value     = value ) TO rt_condition.
+    APPEND VALUE #( type = gc_cond-target_attribute  attribute = target_element ) TO rt_condition.
+    APPEND VALUE #( type = gc_cond-equals ) TO rt_condition. " reversed polish notation...
+  ENDMETHOD.
+
+
+  METHOD true_condition.
+    rt_condition = VALUE #( ( type = if_sadl_query_engine_types=>co_condition_types-true ) ).
+  ENDMETHOD.
+
+
+  METHOD turn_join_condition_direction.
+    LOOP AT it_condition ASSIGNING FIELD-SYMBOL(<s_condition>).
+      APPEND VALUE #( BASE <s_condition>
+                      type = SWITCH #( <s_condition>-type
+                             WHEN gc_cond-source_attribute THEN gc_cond-target_attribute
+                             WHEN gc_cond-target_attribute THEN gc_cond-source_attribute
+                             ELSE <s_condition>-type )
+         ) TO rt_condition.
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD _expect.
+    ASSERT is_token-type = iv_type
+        OR cx_sadl_unexpected_state=>raise_because( |CONDITION TYPE { is_token-type } NOT SUPPORTED| ).
+  ENDMETHOD.
+
+
+  METHOD _get_bound_elements.
+
+    " Returns list of all elements of given token type (e.g. source or target attribute),
+    " which are compared using by EQUAL with a token of another type and the EQUAL is in conjunction.
+    " Second operand may be attribute of another association side, literal or placeholder,
+    " like if condition is "trgA = srcA AND trgB = 'xyz'", the result is {trgA,trgB}
+
+    DATA(lo_analyzer) = cl_sadl_condition_analyzer=>create( it_condition ).
+    LOOP AT it_condition ASSIGNING FIELD-SYMBOL(<s_target_token>) WHERE type = iv_type.
+      DATA(lv_operand_index)      = sy-tabix.
+      DATA(lv_operator_index)     = lo_analyzer->get_parent_operator_index( lv_operand_index ).
+      DATA(lv_second_operand_idx) = COND i( WHEN lv_operand_index + 1 = lv_operator_index
+                                            THEN lv_operand_index - 1 ELSE lv_operand_index + 1 ).
+      IF it_condition[ lv_operator_index ]-type = gc_cond-equals
+          AND lo_analyzer->is_part_of_conjunction( lv_operator_index )
+          AND it_condition[ lv_second_operand_idx ]-type <> iv_type. " compared with fixed value or attribute of different type
+        INSERT <s_target_token>-attribute INTO TABLE rt_elements.
+      ENDIF.
+
+    ENDLOOP.
+  ENDMETHOD.
+
+
+  METHOD _get_remaining_condition.
+    ASSIGN if_sadl_query_engine_types=>co_condition_types TO FIELD-SYMBOL(<co_type>).
+
+    IF it_operators_with_map IS INITIAL.
+      rt_remaining_condition = io_condition->get_tokens( ).
+
+    ELSE.
+      " replace mapping conditions with TRUE invariant
+      DATA(lt_true) = true_condition( ).
+      DATA(lt_operators_to_replace) = VALUE cl_sadl_condition_analyzer=>tt_token_replace(
+          FOR op_idx IN it_operators_with_map ( token_index = op_idx  replacement = lt_true ) ).
+      io_condition->get_replaced_expressions( EXPORTING it_replace    = lt_operators_to_replace
+                                              IMPORTING et_conditions = DATA(lt_remaining_cond_w_invarnts) ).
+
+      " eliminate invariants
+      LOOP AT lt_remaining_cond_w_invarnts TRANSPORTING NO FIELDS
+          WHERE type <> <co_type>-true AND type <> <co_type>-and.
+        EXIT. " additional conditions exist
+      ENDLOOP.
+      IF sy-subrc = 0.  " additional condition exists
+        DATA(lo_cond_without_map) = cl_sadl_condition_analyzer=>create( lt_remaining_cond_w_invarnts ).
+        lo_cond_without_map->get_tokens_eliminating_invarnt(
+          IMPORTING
+            et_condition              = rt_remaining_condition
+            ev_condition_is_invariant = DATA(lv_condition_is_invariant)
+            ev_invariant              = DATA(lv_invariant) ).
+        IF lv_condition_is_invariant = abap_true AND lv_invariant = abap_true.
+          CLEAR rt_remaining_condition.
+        ENDIF.
+      ENDIF. " ELSE: condition contains only mappings => target condition is empty
+    ENDIF.
+  ENDMETHOD.
+ENDCLASS.
