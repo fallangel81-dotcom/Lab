@@ -7,6 +7,7 @@ public section.
 
   interfaces IF_SADL_EXIT .
   interfaces IF_SADL_EXIT_FILTER_TRANSFORM .
+  interfaces IF_SADL_EXIT_CALC_ELEMENT_READ .
 protected section.
 private section.
 
@@ -50,6 +51,17 @@ private section.
            objecttype    type j_obtyp,
            is_userstatus type abap_bool,
          end of ty_cache_loaded .
+  types:
+    "! Zwischenergebnis für calculate: STRING_AGG je ObjectKey
+    begin of ty_status_result,
+      objecttype    type j_obtyp,
+      is_userstatus type abap_bool,
+      objectkey     type j_objnr,
+      status_concat type string,
+    end of ty_status_result .
+  types:
+    ty_status_result_tab type hashed table of ty_status_result
+      with unique key objecttype is_userstatus objectkey .
 
   "*------------------------------------------------------------------*
   "* CLASS-DATA = Cache (geteilt über alle Instanzen auf Work Process)
@@ -114,6 +126,13 @@ private section.
   methods LOAD_USR_STATUS_BY_OBJTYP
     importing
       !IV_OBJECTTYPE type J_OBTYP .
+  "! Liefert CDS-View-Name für Bulk-SELECT in calculate
+  methods RESOLVE_CDS_VIEW
+    importing
+      !IV_OBJECTTYPE    type J_OBTYP
+      !IV_IS_USERSTATUS type ABAP_BOOL
+    returning
+      value(RV_VIEW) type STRING .
 ENDCLASS.
 
 
@@ -484,4 +503,132 @@ method parse_field_name.
   endif.
 
 endmethod.
+
+
+  METHOD if_sadl_exit_calc_element_read~get_calculation_info.
+    "*------------------------------------------------------------------*
+    "* SADL muss OBJECTKEY immer in it_original_data mitliefern,
+    "* damit calculate den Bulk-SELECT aufbauen kann.
+    "*------------------------------------------------------------------*
+    APPEND 'OBJECTKEY' TO et_requested_orig_elements.
+  ENDMETHOD.
+
+
+  METHOD if_sadl_exit_calc_element_read~calculate.
+    "*------------------------------------------------------------------*
+    "* Anzeige von System-/Anwenderstatus als concatenierter String.
+    "*
+    "* Prinzip (analog map_atom + Cache, aber für Instanz-Daten):
+    "*   1. Welche (Objekttyp × Status-Typ)-Kombos werden gebraucht?
+    "*      → parse_field_name() wiederverwenden
+    "*   2. Alle ObjectKeys aus it_original_data sammeln (eine Abfrage
+    "*      für die ganze Seite, kein N+1-Problem)
+    "*   3. Pro Kombo: EIN Bulk-SELECT mit STRING_AGG
+    "*      → HANA erledigt die Aggregation, kein ABAP-Loop nötig
+    "*   4. Ergebnis zeilenweise in ct_calculated_data schreiben
+    "*      → ASSIGN COMPONENT: generisch, unabhängig vom Entity-Typ
+    "*------------------------------------------------------------------*
+
+    "*--- Schritt 1: Benötigte (Objekttyp × Status-Typ)-Kombos ermitteln ---*
+    DATA lt_needed TYPE SORTED TABLE OF ty_bucket_key
+      WITH UNIQUE KEY objecttype is_userstatus.
+
+    LOOP AT it_requested_calc_elements ASSIGNING FIELD-SYMBOL(<elem_name>).
+      DATA(ls_mapping) = me->parse_field_name( to_upper( <elem_name> ) ).
+      CHECK ls_mapping-is_valid = abap_true.
+      IF NOT line_exists( lt_needed[ objecttype    = ls_mapping-objecttype
+                                     is_userstatus = ls_mapping-is_userstatus ] ).
+        INSERT VALUE #( objecttype    = ls_mapping-objecttype
+                        is_userstatus = ls_mapping-is_userstatus ) INTO TABLE lt_needed.
+      ENDIF.
+    ENDLOOP.
+
+    CHECK lt_needed IS NOT INITIAL.
+
+    "*--- Schritt 2: ObjectKeys aus it_original_data sammeln ---*
+    DATA lt_keys TYPE rseloption.
+
+    LOOP AT it_original_data ASSIGNING FIELD-SYMBOL(<orig>).
+      ASSIGN COMPONENT 'OBJECTKEY' OF STRUCTURE <orig> TO FIELD-SYMBOL(<objkey>).
+      CHECK sy-subrc = 0 AND <objkey> IS NOT INITIAL.
+      APPEND VALUE #( sign = 'I' option = 'EQ' low = <objkey> ) TO lt_keys.
+    ENDLOOP.
+
+    SORT lt_keys BY low.
+    DELETE ADJACENT DUPLICATES FROM lt_keys COMPARING low.
+
+    CHECK lt_keys IS NOT INITIAL.
+
+    "*--- Schritt 3: Bulk-SELECT STRING_AGG pro Kombo ---*
+    DATA lt_results TYPE ty_status_result_tab.
+
+    LOOP AT lt_needed ASSIGNING FIELD-SYMBOL(<needed>).
+      DATA(lv_view) = me->resolve_cds_view(
+        iv_objecttype    = <needed>-objecttype
+        iv_is_userstatus = <needed>-is_userstatus ).
+      CHECK lv_view IS NOT INITIAL.
+
+      SELECT objectkey,
+             string_agg( status, ' ' ORDER BY status ) AS status_concat
+        FROM (<lv_view>)
+        WHERE objectkey IN @lt_keys
+        GROUP BY objectkey
+        INTO TABLE @DATA(lt_sel).
+
+      LOOP AT lt_sel ASSIGNING FIELD-SYMBOL(<sel>).
+        TRY.
+          INSERT VALUE #( objecttype    = <needed>-objecttype
+                          is_userstatus = <needed>-is_userstatus
+                          objectkey     = <sel>-objectkey
+                          status_concat = <sel>-status_concat ) INTO TABLE lt_results.
+        CATCH cx_sy_itab_duplicate_key.  " kann nicht auftreten, aber defensiv
+        ENDTRY.
+      ENDLOOP.
+    ENDLOOP.
+
+    "*--- Schritt 4: ct_calculated_data befüllen ---*
+    LOOP AT it_original_data ASSIGNING <orig>.
+      APPEND INITIAL LINE TO ct_calculated_data ASSIGNING FIELD-SYMBOL(<result>).
+      <result> = <orig>.  " alle Original-Felder kopieren
+
+      ASSIGN COMPONENT 'OBJECTKEY' OF STRUCTURE <result> TO FIELD-SYMBOL(<key>).
+
+      LOOP AT it_requested_calc_elements ASSIGNING <elem_name>.
+        DATA(ls_elem_map) = me->parse_field_name( to_upper( <elem_name> ) ).
+        CHECK ls_elem_map-is_valid = abap_true.
+
+        DATA(lv_concat) = VALUE #(
+          lt_results[ objecttype    = ls_elem_map-objecttype
+                      is_userstatus = ls_elem_map-is_userstatus
+                      objectkey     = <key> ]-status_concat
+          DEFAULT '' ).
+
+        ASSIGN COMPONENT <elem_name> OF STRUCTURE <result> TO FIELD-SYMBOL(<field>).
+        CHECK sy-subrc = 0.
+        <field> = lv_concat.
+      ENDLOOP.
+    ENDLOOP.
+
+  ENDMETHOD.
+
+
+  METHOD resolve_cds_view.
+    "*------------------------------------------------------------------*
+    "* Liefert den CDS-View-Namen für Bulk-SELECT in calculate.
+    "* Jeder View filtert bereits auf den richtigen OBJNR-Prefix
+    "* und den richtigen Status-Typ (I% = System, E% = Anwender).
+    "*------------------------------------------------------------------*
+    rv_view = COND #(
+      WHEN iv_objecttype = gc_objecttype-equipment    AND iv_is_userstatus = abap_false THEN '/ETN/I_EQUI_ACT_SYS_STAT'
+      WHEN iv_objecttype = gc_objecttype-equipment    AND iv_is_userstatus = abap_true  THEN '/ETN/I_EQUI_ACT_USR_STAT'
+      WHEN iv_objecttype = gc_objecttype-funcloc      AND iv_is_userstatus = abap_false THEN '/ETN/I_FLOC_ACT_SYS_STAT'
+      WHEN iv_objecttype = gc_objecttype-funcloc      AND iv_is_userstatus = abap_true  THEN '/ETN/I_FLOC_ACT_USR_STAT'
+      WHEN iv_objecttype = gc_objecttype-notification AND iv_is_userstatus = abap_false THEN '/ETN/I_NOTIF_ACT_SYS_STAT'
+      WHEN iv_objecttype = gc_objecttype-notification AND iv_is_userstatus = abap_true  THEN '/ETN/I_NOTIF_ACT_USR_STAT'
+      WHEN iv_objecttype = gc_objecttype-operation    AND iv_is_userstatus = abap_false THEN '/ETN/I_OPER_ACT_SYS_STAT'
+      WHEN iv_objecttype = gc_objecttype-operation    AND iv_is_userstatus = abap_true  THEN '/ETN/I_OPER_ACT_USR_STAT'
+    ).
+  ENDMETHOD.
+
+
 ENDCLASS.
