@@ -1,0 +1,15 @@
+define view entity /ETN/I_NOTIF_ACT_USR_STAT
+                           as select from jsto
+                                      inner join jest
+                                              on jsto.objnr = jest.objnr
+                                             and jsto.obtyp = 'QMI'         // ObjectType - Meldung
+                                             and jsto.stsma like 'ZDPM%'    // Statusschema für Meldungen
+                                             and jest.stat  like 'E%'        // nur Anwenderstatus
+                                             and jest.inact = ''             // nur aktive Status
+                                             and jest.objnr like 'QM%'       // nur Meldungs-Objekte
+
+{
+ key jest.objnr     as ObjectKey,
+ key jest.stat      as Status,
+     jsto.stsma     as StatusProfile
+}

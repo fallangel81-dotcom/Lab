@@ -1,0 +1,15 @@
+define view entity /ETN/I_FLOC_ACT_USR_STAT
+                           as select from jsto
+                                      inner join jest
+                                              on jsto.objnr = jest.objnr
+                                             and jsto.obtyp = 'IFL'         // ObjectType - Funktionaler Platz
+                                             and jsto.stsma like 'ZDPM%'    // Statusschema für Funktionale Plätze
+                                             and jest.stat  like 'E%'        // nur Anwenderstatus
+                                             and jest.inact = ''             // nur aktive Status
+                                             and jest.objnr like 'IL%'       // nur FuncLoc-Objekte
+
+{
+ key jest.objnr     as ObjectKey,
+ key jest.stat      as Status,
+     jsto.stsma     as StatusProfile
+}

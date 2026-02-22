@@ -1,0 +1,15 @@
+define view entity /ETN/I_OPER_ACT_USR_STAT
+                           as select from jsto
+                                      inner join jest
+                                              on jsto.objnr = jest.objnr
+                                             and jsto.obtyp = 'OVG'         // ObjectType - Vorgang
+                                             and jsto.stsma like 'ZDPM%'    // Statusschema für Vorgänge
+                                             and jest.stat  like 'E%'        // nur Anwenderstatus
+                                             and jest.inact = ''             // nur aktive Status
+                                             and jest.objnr like 'OV%'       // nur Vorgangs-Objekte
+
+{
+ key jest.objnr     as ObjectKey,
+ key jest.stat      as Status,
+     jsto.stsma     as StatusProfile
+}

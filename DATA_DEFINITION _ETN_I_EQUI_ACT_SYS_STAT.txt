@@ -1,0 +1,11 @@
+define view entity /ETN/I_EQUI_ACT_SYS_STAT
+                            as select from jest
+
+{
+ key jest.objnr     as ObjectKey,
+ key jest.stat      as Status
+
+}
+where jest.objnr like 'IE%'   //nur Systemstatus für Equipment - Objtyp IEQ
+    and jest.inact = ''        //nur aktive Systemstatus filtern
+    and jest.stat like 'I%'   //nur Systemstatus filtern

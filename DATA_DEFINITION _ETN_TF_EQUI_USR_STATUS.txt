@@ -1,0 +1,7 @@
+define table function /ETN/TF_EQUI_USR_STATUS
+  returns {
+    Mandt        : abap.clnt(3);
+    ObjectKey    : abap.char(22);   // JEST.OBJNR - Equipment Objektnummer (IE...)
+    User_Status  : abap.char(80);   // STRING_AGG aktiver Anwenderstatuscodes
+  }
+  implemented by method /ETN/CL_PM_VDM_IH_AMDP=>GET_CONCAT_USR_STATUS_EQUI;

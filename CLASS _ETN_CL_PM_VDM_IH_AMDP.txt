@@ -1,0 +1,213 @@
+CLASS /ETN/CL_PM_VDM_IH_AMDP DEFINITION
+  PUBLIC
+  FINAL
+  CREATE PUBLIC.
+
+"*=====================================================================*
+"* Zweck:
+"*   AMDP-Table-Functions für concatenierte IH-Status (Anzeige).
+"*   Analog zu /ETN/CL_PM_VDM_STAT_ORDER (Aufträge), aber für:
+"*     IEQ  – Equipment        (JEST.OBJNR like 'IE%')
+"*     IFL  – Funktionaler Platz (JEST.OBJNR like 'IL%')
+"*     QMI  – Meldung          (JEST.OBJNR like 'QM%')
+"*     OVG  – Vorgang          (JEST.OBJNR like 'OV%')
+"*
+"* Jede Methode ist eine Table-Function (HANA) und liefert:
+"*   STRING_AGG( aktive Systemstatuscodes, ' ' ) pro ObjectKey
+"*   STRING_AGG( aktive Anwenderstatuscodes, ' ' ) pro ObjectKey
+"*
+"* Aktivierungsreihenfolge im ABAP-System:
+"*   1. JEST-basierende CDS-Views (/ETN/I_EQUI_ACT_SYS_STAT etc.)
+"*   2. Table-Function-DDL (/ETN/TF_EQUI_SYS_STATUS etc.)
+"*   3. Diese Klasse
+"*   4. CDS-Entitäten die die TF per Association verwenden
+"*
+"* User Story: EAMR-43185_Expensive Statements
+"*=====================================================================*
+
+PUBLIC SECTION.
+
+  INTERFACES if_amdp_marker_hdb.
+
+  "-- Equipment (IEQ) --------------------------------------------------"
+  CLASS-METHODS get_concat_sys_status_equi
+    FOR TABLE FUNCTION /ETN/TF_EQUI_SYS_STATUS.
+
+  CLASS-METHODS get_concat_usr_status_equi
+    FOR TABLE FUNCTION /ETN/TF_EQUI_USR_STATUS.
+
+  "-- Funktionaler Platz (IFL) -----------------------------------------"
+  CLASS-METHODS get_concat_sys_status_floc
+    FOR TABLE FUNCTION /ETN/TF_FLOC_SYS_STATUS.
+
+  CLASS-METHODS get_concat_usr_status_floc
+    FOR TABLE FUNCTION /ETN/TF_FLOC_USR_STATUS.
+
+  "-- Meldung (QMI) ---------------------------------------------------"
+  CLASS-METHODS get_concat_sys_status_notif
+    FOR TABLE FUNCTION /ETN/TF_NOTIF_SYS_STATUS.
+
+  CLASS-METHODS get_concat_usr_status_notif
+    FOR TABLE FUNCTION /ETN/TF_NOTIF_USR_STATUS.
+
+  "-- Vorgang (OVG) ---------------------------------------------------"
+  CLASS-METHODS get_concat_sys_status_oper
+    FOR TABLE FUNCTION /ETN/TF_OPER_SYS_STATUS.
+
+  CLASS-METHODS get_concat_usr_status_oper
+    FOR TABLE FUNCTION /ETN/TF_OPER_USR_STATUS.
+
+PROTECTED SECTION.
+PRIVATE SECTION.
+ENDCLASS.
+
+
+
+CLASS /ETN/CL_PM_VDM_IH_AMDP IMPLEMENTATION.
+
+
+  "======================================================================"
+  "== EQUIPMENT (IEQ)                                                   ="
+  "======================================================================"
+
+  METHOD get_concat_sys_status_equi
+    BY DATABASE FUNCTION FOR HDB LANGUAGE SQLSCRIPT
+    OPTIONS READ-ONLY
+    USING /ETN/I_EQUI_ACT_SYS_STAT.
+
+    -- Aktive Systemstatuscodes je Equipment zu einem String zusammenfassen
+    -- Quelle: JEST gefiltert auf OBJNR like 'IE%', STAT like 'I%', INACT = ''
+    RETURN SELECT :clnt          AS Mandt,
+                  ObjectKey,
+                  string_agg( Status, ' ' ORDER BY Status ) AS System_Status
+             FROM "/ETN/I_EQUI_ACT_SYS_STAT"
+            GROUP BY ObjectKey;
+
+  ENDMETHOD.
+
+
+  METHOD get_concat_usr_status_equi
+    BY DATABASE FUNCTION FOR HDB LANGUAGE SQLSCRIPT
+    OPTIONS READ-ONLY
+    USING /ETN/I_EQUI_ACT_USR_STAT.
+
+    -- Aktive Anwenderstatuscodes je Equipment zu einem String zusammenfassen
+    -- Quelle: JSTO + JEST gefiltert auf OBTYP = 'IEQ', STAT like 'E%', INACT = ''
+    RETURN SELECT :clnt          AS Mandt,
+                  ObjectKey,
+                  string_agg( Status, ' ' ORDER BY Status ) AS User_Status
+             FROM "/ETN/I_EQUI_ACT_USR_STAT"
+            GROUP BY ObjectKey;
+
+  ENDMETHOD.
+
+
+  "======================================================================"
+  "== FUNKTIONALER PLATZ (IFL)                                          ="
+  "======================================================================"
+
+  METHOD get_concat_sys_status_floc
+    BY DATABASE FUNCTION FOR HDB LANGUAGE SQLSCRIPT
+    OPTIONS READ-ONLY
+    USING /ETN/I_FLOC_ACT_SYS_STAT.
+
+    -- Aktive Systemstatuscodes je Funktionalem Platz zu einem String zusammenfassen
+    -- Quelle: JEST gefiltert auf OBJNR like 'IL%', STAT like 'I%', INACT = ''
+    RETURN SELECT :clnt          AS Mandt,
+                  ObjectKey,
+                  string_agg( Status, ' ' ORDER BY Status ) AS System_Status
+             FROM "/ETN/I_FLOC_ACT_SYS_STAT"
+            GROUP BY ObjectKey;
+
+  ENDMETHOD.
+
+
+  METHOD get_concat_usr_status_floc
+    BY DATABASE FUNCTION FOR HDB LANGUAGE SQLSCRIPT
+    OPTIONS READ-ONLY
+    USING /ETN/I_FLOC_ACT_USR_STAT.
+
+    -- Aktive Anwenderstatuscodes je Funktionalem Platz zu einem String zusammenfassen
+    -- Quelle: JSTO + JEST gefiltert auf OBTYP = 'IFL', STAT like 'E%', INACT = ''
+    RETURN SELECT :clnt          AS Mandt,
+                  ObjectKey,
+                  string_agg( Status, ' ' ORDER BY Status ) AS User_Status
+             FROM "/ETN/I_FLOC_ACT_USR_STAT"
+            GROUP BY ObjectKey;
+
+  ENDMETHOD.
+
+
+  "======================================================================"
+  "== MELDUNG (QMI)                                                     ="
+  "======================================================================"
+
+  METHOD get_concat_sys_status_notif
+    BY DATABASE FUNCTION FOR HDB LANGUAGE SQLSCRIPT
+    OPTIONS READ-ONLY
+    USING /ETN/I_NOTIF_ACT_SYS_STAT.
+
+    -- Aktive Systemstatuscodes je Meldung zu einem String zusammenfassen
+    -- Quelle: JEST gefiltert auf OBJNR like 'QM%', STAT like 'I%', INACT = ''
+    RETURN SELECT :clnt          AS Mandt,
+                  ObjectKey,
+                  string_agg( Status, ' ' ORDER BY Status ) AS System_Status
+             FROM "/ETN/I_NOTIF_ACT_SYS_STAT"
+            GROUP BY ObjectKey;
+
+  ENDMETHOD.
+
+
+  METHOD get_concat_usr_status_notif
+    BY DATABASE FUNCTION FOR HDB LANGUAGE SQLSCRIPT
+    OPTIONS READ-ONLY
+    USING /ETN/I_NOTIF_ACT_USR_STAT.
+
+    -- Aktive Anwenderstatuscodes je Meldung zu einem String zusammenfassen
+    -- Quelle: JSTO + JEST gefiltert auf OBTYP = 'QMI', STAT like 'E%', INACT = ''
+    RETURN SELECT :clnt          AS Mandt,
+                  ObjectKey,
+                  string_agg( Status, ' ' ORDER BY Status ) AS User_Status
+             FROM "/ETN/I_NOTIF_ACT_USR_STAT"
+            GROUP BY ObjectKey;
+
+  ENDMETHOD.
+
+
+  "======================================================================"
+  "== VORGANG (OVG)                                                     ="
+  "======================================================================"
+
+  METHOD get_concat_sys_status_oper
+    BY DATABASE FUNCTION FOR HDB LANGUAGE SQLSCRIPT
+    OPTIONS READ-ONLY
+    USING /ETN/I_OPER_ACT_SYS_STAT.
+
+    -- Aktive Systemstatuscodes je Vorgang zu einem String zusammenfassen
+    -- Quelle: JEST gefiltert auf OBJNR like 'OV%', STAT like 'I%', INACT = ''
+    RETURN SELECT :clnt          AS Mandt,
+                  ObjectKey,
+                  string_agg( Status, ' ' ORDER BY Status ) AS System_Status
+             FROM "/ETN/I_OPER_ACT_SYS_STAT"
+            GROUP BY ObjectKey;
+
+  ENDMETHOD.
+
+
+  METHOD get_concat_usr_status_oper
+    BY DATABASE FUNCTION FOR HDB LANGUAGE SQLSCRIPT
+    OPTIONS READ-ONLY
+    USING /ETN/I_OPER_ACT_USR_STAT.
+
+    -- Aktive Anwenderstatuscodes je Vorgang zu einem String zusammenfassen
+    -- Quelle: JSTO + JEST gefiltert auf OBTYP = 'OVG', STAT like 'E%', INACT = ''
+    RETURN SELECT :clnt          AS Mandt,
+                  ObjectKey,
+                  string_agg( Status, ' ' ORDER BY Status ) AS User_Status
+             FROM "/ETN/I_OPER_ACT_USR_STAT"
+            GROUP BY ObjectKey;
+
+  ENDMETHOD.
+
+
+ENDCLASS.

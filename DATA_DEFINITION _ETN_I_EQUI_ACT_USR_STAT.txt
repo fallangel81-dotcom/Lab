@@ -1,0 +1,15 @@
+define view entity /ETN/I_EQUI_ACT_USR_STAT
+                           as select from jsto
+                                      inner join jest
+                                              on jsto.objnr = jest.objnr
+                                             and jsto.obtyp = 'IEQ'         // ObjectType - Equipment
+                                             and jsto.stsma like 'ZDPM%'    // Statusschema für Equipment
+                                             and jest.stat  like 'E%'        // nur Anwenderstatus
+                                             and jest.inact = ''             // nur aktive Status
+                                             and jest.objnr like 'IE%'       // nur Equipment-Objekte
+
+{
+ key jest.objnr     as ObjectKey,
+ key jest.stat      as Status,
+     jsto.stsma     as StatusProfile
+}

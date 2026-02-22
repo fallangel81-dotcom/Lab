@@ -1,0 +1,11 @@
+define view entity /ETN/I_NOTIF_ACT_SYS_STAT
+                            as select from jest
+
+{
+ key jest.objnr     as ObjectKey,
+ key jest.stat      as Status
+
+}
+where jest.objnr like 'QM%'   //nur Systemstatus für Meldungen - Objtyp QMI
+    and jest.inact = ''        //nur aktive Systemstatus filtern
+    and jest.stat like 'I%'   //nur Systemstatus filtern
