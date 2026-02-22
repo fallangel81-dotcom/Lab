@@ -134,17 +134,14 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
     "*   OR (STATUSCODE = 'E0003' AND STATUSPROFILE = 'YPM02')
     "*------------------------------------------------------------------*
 
-    DATA(lo_cfac) = cl_sadl_cond_prov_factory_pub=>create_simple_cond_factory( ).
-    DATA lo_conditions TYPE REF TO if_sadl_cond_provider_generic.
-
     LOOP AT it_statuscodes ASSIGNING FIELD-SYMBOL(<code>).
 
       DATA(lo_single) = COND #(
         WHEN <code>-statusprofile IS NOT INITIAL
-        THEN lo_cfac->element( 'STATUSCODE' )->equals( <code>-statuscode )->and( io_condition =
-                        lo_cfac->element( 'STATUSPROFILE' )->equals( <code>-statusprofile )
+        THEN io_cfac->element( 'STATUSCODE' )->equals( <code>-statuscode )->and( io_condition =
+                        io_cfac->element( 'STATUSPROFILE' )->equals( <code>-statusprofile )
                     )
-        ELSE lo_cfac->element( 'STATUSCODE' )->equals( <code>-statuscode )
+        ELSE io_cfac->element( 'STATUSCODE' )->equals( <code>-statuscode )
       ).
 
       ro_condition = COND #(
@@ -184,37 +181,21 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
 
   METHOD determine_statuscode.
 
-* if not line_exists( gt_cache_loaded[ objecttype     = iv_objecttype
-*                                         is_userstatus  = iv_is_userstatus ] ).
-*
-*      if iv_is_userstatus = abap_false.
-*        me->load_sys_status_by_objtyp( iv_objecttype ).
-*      else.
-*        me->load_usr_status_by_objtyp( iv_objecttype ).
-*      endif.
-*
-*      insert value #( objecttype    = iv_objecttype
-*                      is_userstatus = iv_is_userstatus
-*                     ) into table gt_cache_loaded.
-*
-*    endif.
-
     "- Quick check if statuscodes are already cached (Lazy loading)
     me->check_cache_loaded(
       iv_objecttype    = is_mapping-objecttype
       iv_is_userstatus = is_mapping-is_userstatus
     ).
 
-    "-- Lookup/Get status codes from cache --"
-*    rt_statuscodes = VALUE #(
-*      FOR <ls_cache> IN gt_cache
-*      WHERE <s>-objecttype      = is_mapping-objecttype
-*        AND ( is_userstatus   = is_mapping-is_userstatus )
-*        AND ( statusshortname = iv_statusname            )
-*      ( statuscode    = <s>-statuscode
-*        statusprofile = <s>-statusprofile
-*      )
-*    ).
+    "-- Lookup: Status-Kurzname → interne Code(s) aus Cache --"
+    rt_statuscodes = VALUE #(
+      FOR <s> IN gt_cache
+      WHERE ( objecttype      = is_mapping-objecttype
+          AND is_userstatus   = is_mapping-is_userstatus
+          AND statusshortname = iv_statusname )
+      ( statuscode    = <s>-statuscode
+        statusprofile = <s>-statusprofile )
+    ).
 
     SORT rt_statuscodes BY statusprofile statuscode.
     DELETE ADJACENT DUPLICATES FROM rt_statuscodes COMPARING ALL FIELDS.
@@ -271,20 +252,10 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
     "* SADL ruft map_atom für jeden Filter-Atom separat auf.
     "* Feldname verrät per Pattern alles was wir brauchen.
     "*------------------------------------------------------------------*
-    DATA: lv_element_w_path        TYPE sadl_entity_element,
-          lv_lambda                TYPE string,
-          lv_element_w_lambda_path TYPE string.
-
-*          lv_lambda                = to_upper( substring( val = mv_assoc_activeststxt off = 1 ) ).
-*          lv_element_w_lambda_path = lv_lambda && '.STATUSSHORTNAME'.
-*          lv_element_w_path        = mv_assoc_activeststxt && '.STATUSSHORTNAME'.
-
-
     DATA: lv_operator_adjusted TYPE string,
           lv_value_adjusted    TYPE string.
 
     DATA(lo_cfac) = cl_sadl_cond_prov_factory_pub=>create_simple_cond_factory( ).
-*   DATA(lo_cfac) = cl_sadl_cond_prov_factory_pub=>create_basic_condition_factory( ).
 
 
     "*------------------------------------------------------------------*
@@ -501,17 +472,14 @@ method parse_field_name.
     "* Status-Typ aus View-Feldnamen erkennen - SYSTEM/SYS vs. USER/USR    --*
     "*-----------------------------------------------------------------------*
     if lv_field cs 'SYSTEM' or lv_field cs 'SYS'.
-      rs_mapping-is_valid = abap_true.
-    endif.
-
-    if lv_field cs 'USER' or lv_field cs 'USR'.
+      rs_mapping-is_valid      = abap_true.
+      rs_mapping-is_userstatus = abap_false.
+    elseif lv_field cs 'USER' or lv_field cs 'USR'.
+      rs_mapping-is_valid      = abap_true.
       rs_mapping-is_userstatus = abap_true.
-      rs_mapping-is_valid = abap_true.
-    else.
-      " STAT + Objekttyp erkannt, aber kein Status-Typ
-      " → Nicht eindeutig genug, nicht anfassen
-      " Beispiel: 'OrderStatus' ohne SYS/USR
-      return.
+    " else: kein SYS/USR erkannt → is_valid bleibt abap_false
+    "       → CHECK in map_atom schlägt an → Feld wird nicht angefasst
+    "       Beispiel: 'OrderStatus' ohne SYS/USR
     endif.
   endif.
 
