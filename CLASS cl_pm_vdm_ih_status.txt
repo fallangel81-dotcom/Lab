@@ -112,8 +112,9 @@ private section.
   "! Baut OR-verknüpfte Condition aus StatusCode-Liste
   methods BUILD_STATUS_CONDITION
     importing
-      !IT_STATUSCODES type TY_STATUSCODE_TAB
-      !IO_CFAC type ref to IF_SADL_SIMPLE_COND_FACTORY
+      !IT_STATUSCODES   type TY_STATUSCODE_TAB
+      !IO_CFAC          type ref to IF_SADL_SIMPLE_COND_FACTORY
+      !IV_IS_USERSTATUS type ABAP_BOOL
     returning
       value(RO_CONDITION) type ref to IF_SADL_COND_PROVIDER_GENERIC .
   methods CHECK_CACHE_LOADED
@@ -143,24 +144,32 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
   METHOD build_status_condition.
 
     "*------------------------------------------------------------------*
-    "* Baut OR-verknüpfte Condition
+    "* Baut OR-verknüpfte Condition aus Statuscode-Liste.
+    "*
+    "* Assoziationsnamen sind in allen Hauptviews einheitlich:
+    "*   _systemstatus  →  Systemstatus  (nur Status-Feld)
+    "*   _userstatus    →  Anwenderstatus (Status + StatusProfile)
     "*
     "* Systemstatus:
-    "*   STATUSCODE = 'I0076'
+    "*   _systemstatus.Status = 'I0076'
     "*
     "* Anwenderstatus (Profil je Auftragsart!):
-    "*   (STATUSCODE = 'E0001' AND STATUSPROFILE = 'YPM01')
-    "*   OR (STATUSCODE = 'E0003' AND STATUSPROFILE = 'YPM02')
+    "*   (_userstatus.Status = 'E0001' AND _userstatus.StatusProfile = 'YPM01')
+    "*   OR (_userstatus.Status = 'E0003' AND _userstatus.StatusProfile = 'YPM02')
     "*------------------------------------------------------------------*
+
+    DATA(lv_status_path)  = COND string(
+      WHEN iv_is_userstatus = abap_true THEN '_userstatus.Status'
+      ELSE                                   '_systemstatus.Status' ).
 
     LOOP AT it_statuscodes ASSIGNING FIELD-SYMBOL(<code>).
 
       DATA(lo_single) = COND #(
         WHEN <code>-statusprofile IS NOT INITIAL
-        THEN io_cfac->element( 'STATUSCODE' )->equals( <code>-statuscode )->and( io_condition =
-                        io_cfac->element( 'STATUSPROFILE' )->equals( <code>-statusprofile )
+        THEN io_cfac->element( lv_status_path )->equals( <code>-statuscode )->and( io_condition =
+                        io_cfac->element( '_userstatus.StatusProfile' )->equals( <code>-statusprofile )
                     )
-        ELSE io_cfac->element( 'STATUSCODE' )->equals( <code>-statuscode )
+        ELSE io_cfac->element( lv_status_path )->equals( <code>-statuscode )
       ).
 
       ro_condition = COND #(
@@ -302,13 +311,17 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
     "*------------------------------------------------------------------*
     "* Schritt 3: Operator-Handling
     "*------------------------------------------------------------------*
+    DATA(lv_status_path) = COND string(
+      WHEN ls_mapping-is_userstatus = abap_true THEN '_userstatus.Status'
+      ELSE                                            '_systemstatus.Status' ).
+
     CASE lv_operator_adjusted.
 
       WHEN if_sadl_exit_filter_transform~co_operator-equals.
 
         " ── Leerstring → NULL-Check ───────────────────────────────────
         IF condense( val = iv_value ) = ''.
-          ro_condition = lo_cfac->element( 'STATUSCODE' )->is_null( ).
+          ro_condition = lo_cfac->element( lv_status_path )->is_null( ).
 
         " ── Zu lang → Kein gültiger Statuscode (max 4 Zeichen) ────────
         ELSEIF strlen( lv_value_adjusted ) > 4.
@@ -326,8 +339,9 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
             ro_condition = lo_cfac->false( ).
           ELSE.
             ro_condition = me->build_status_condition(
-              it_statuscodes = lt_statuscodes
-              io_cfac        = lo_cfac
+              it_statuscodes   = lt_statuscodes
+              io_cfac          = lo_cfac
+              iv_is_userstatus = ls_mapping-is_userstatus
             ).
           ENDIF.
 
@@ -341,7 +355,7 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
 
         " ── Leerstring → Objekte die IRGENDEINEN Status haben ──────────
         IF condense( val = iv_value ) = ''.
-          ro_condition = lo_cfac->element( 'STATUSCODE' )->is_not_null( ).
+          ro_condition = lo_cfac->element( lv_status_path )->is_not_null( ).
 
         " ── Zu lang → kein gültiger Statuscode → alle Objekte matchen ──
         ELSEIF strlen( lv_value_adjusted ) > 4.
@@ -362,15 +376,16 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
             ro_condition = lo_cfac->true( ).
           ELSE.
             ro_condition = me->build_status_condition(
-              it_statuscodes = lt_ne_codes
-              io_cfac        = lo_cfac
+              it_statuscodes   = lt_ne_codes
+              io_cfac          = lo_cfac
+              iv_is_userstatus = ls_mapping-is_userstatus
             ).
           ENDIF.
 
         ENDIF.
 
       WHEN if_sadl_exit_filter_transform~co_operator-is_null.
-        ro_condition = lo_cfac->element( 'STATUSCODE' )->is_null( ).
+        ro_condition = lo_cfac->element( lv_status_path )->is_null( ).
 
       WHEN OTHERS.
         " <, >, >=, <= ergeben bei Status keinen Sinn
