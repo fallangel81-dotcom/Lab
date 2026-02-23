@@ -337,6 +337,38 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
         " Echte Wildcards (FR*, *EI) → kein Lookup möglich
         ro_condition = lo_cfac->false( ).
 
+      WHEN if_sadl_exit_filter_transform~co_operator-not_equals.
+
+        " ── Leerstring → Objekte die IRGENDEINEN Status haben ──────────
+        IF condense( val = iv_value ) = ''.
+          ro_condition = lo_cfac->element( 'STATUSCODE' )->is_not_null( ).
+
+        " ── Zu lang → kein gültiger Statuscode → alle Objekte matchen ──
+        ELSEIF strlen( lv_value_adjusted ) > 4.
+          ro_condition = lo_cfac->true( ).
+
+        " ── Normaler NE-Filter: positive Bedingung zurückgeben ─────────
+        " SADL baut selbst NOT EXISTS( ... WHERE STATUS = 'I0076' )
+        ELSE.
+
+          DATA(lt_ne_codes) = me->determine_statuscode(
+            iv_statusname = lv_value_adjusted
+            is_mapping    = ls_mapping
+          ).
+
+          IF lt_ne_codes IS INITIAL.
+            " Status existiert gar nicht → kein Objekt kann ihn haben
+            " → "nicht haben" trifft auf alle zu
+            ro_condition = lo_cfac->true( ).
+          ELSE.
+            ro_condition = me->build_status_condition(
+              it_statuscodes = lt_ne_codes
+              io_cfac        = lo_cfac
+            ).
+          ENDIF.
+
+        ENDIF.
+
       WHEN if_sadl_exit_filter_transform~co_operator-is_null.
         ro_condition = lo_cfac->element( 'STATUSCODE' )->is_null( ).
 
