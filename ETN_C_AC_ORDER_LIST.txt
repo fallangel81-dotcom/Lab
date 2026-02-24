@@ -1,0 +1,571 @@
+@AbapCatalog.viewEnhancementCategory: [#NONE]
+@AccessControl.authorizationCheck: #CHECK
+@EndUserText.label: 'ac cockpit list'
+@Metadata.ignorePropagatedAnnotations: true
+@ObjectModel.usageType:{
+    serviceQuality: #X,
+    sizeCategory: #S,
+    dataClass: #MIXED
+}
+
+@Search.searchable: true
+@OData.entitySet.name: 'OrderList'
+define view entity /ETN/C_AC_ORDER_LIST
+  as select from /ETN/I_AC_ORDER_LIST
+
+  association [0..1] to /ETN/I_ORGDATA                 as _orgdata        on  _orgdata.PlanningPlant = $projection.PlanPlant
+
+  association [0..1] to /ETN/I_KID_NAME                as _createdby      on  _createdby.KID = $projection.Entered_By
+  association [0..1] to /ETN/I_KID_NAME                as _changedby      on  _changedby.KID = $projection.Changed_By
+
+  association [0..1] to /ETN/I_PM_ACTIVITY_TYPE_DESC   as _ilaDesc        on  _ilaDesc.PmActivityType = $projection.Maint_Activity_Type
+                                                                          and _ilaDesc.Language       = $session.system_language
+
+  association [0..1] to /ETN/I_ORDERTYPE_IH            as _ordertype      on  _ordertype.OrderType = $projection.Order_Type
+
+  association [0..1] to /ETN/I_T024I                   as _plngroup       on  _plngroup.iwerk = $projection.PlanPlant
+                                                                          and _plngroup.ingrp = $projection.PlanGroup
+
+  association [0..1] to /ETN/I_PM_T357                 as _plnsct         on  _plnsct.werks = $projection.PlnSectionWerks
+                                                                          and _plnsct.beber = $projection.PlnSection
+
+  association [0..1] to /ETN/I_ABCIndicator_Desc       as _abcDesc        on  _abcDesc.ABCIndicator = $projection.ABC_Indicator
+                                                                          and _abcDesc.Language     = $session.system_language
+
+  association [0..1] to /ETN/I_PM_OBJTY_T              as _techobjEQdesc  on  _techobjEQdesc.eqart = $projection.EquiEqart
+                                                                          and _techobjEQdesc.spras = $session.system_language
+
+  association [0..1] to /ETN/I_PM_OBJTY_T              as _techobjTPdesc  on  _techobjTPdesc.eqart = $projection.FunclocEqart
+                                                                          and _techobjTPdesc.spras = $session.system_language
+
+//  association [0..1] to /ETN/I_SYSTEM_STATUS_CONCAT    as _sysconcat      on  _sysconcat.OrderID = $projection.OrderID
+//  association [0..1] to /ETN/I_ORDER_USR_STATUS_HELPER as _usrconcat      on  _usrconcat.ObjectKey = $projection.ObjectKey
+
+   association [0..*] to /ETN/I_ORDER_ACT_USR_STAT     as _userstatus     on  _userstatus.ObjectKey   = $projection.ObjectKey
+   association [0..*] to /ETN/I_ORDER_ACT_SYS_STAT     as _systemstatus   on  _systemstatus.ObjectKey = $projection.ObjectKey
+
+//  association [0..*] to /ETN/PM_I_PLNGRP               as _Tasklist       on  $projection.OrderID = _Tasklist.OrderID
+
+  association [0..1] to /ETN/I_PARTNER_ORDER           as _partner        on  _partner.OrderId = $projection.OrderID
+  //EAMR-17902 IH - Auftrag - BE - Cockpit - Allgemeines - Auftragsübersicht Suche Marktkunde (INCC)
+  // CD 9300007586 MR73909 24.09.2025
+  //  association [0..1] to /INCC/C_PM_ORSD_CR             as _customers      on  _customers.OrderNumber = $projection.OrderID
+
+  //-->EAMR-37213 (9300007465), Top Functional Location with Sort, S66123, 05.09.2025
+  association [0..1] to /ETN/I_TopFuncLoc_Text         as _TopFuncLocText on  $projection.Function_Location = _TopFuncLocText.FuncLoc_Int
+  //<--EAMR-37213 (9300007465), Top Functional Location with Sort, S66123, 05.09.2025
+{
+       @Search:{ defaultSearchElement: true, fuzzinessThreshold: 1, ranking: #HIGH }
+       @EndUserText.label: 'Order Number'
+  key  OrderID,
+
+       @Search:{ defaultSearchElement: true, fuzzinessThreshold: 0.7, ranking: #HIGH }
+       @EndUserText.label: 'Short text'
+       @EndUserText.quickInfo: 'Short text of the order'
+       Short_Text,
+
+       @EndUserText.label: 'Controlling area'                     //'Kostenrechnungskreis'
+       @EndUserText.quickInfo: 'Controlling area'
+       ControllingArea                               as co_area,
+
+       ObjectKey,
+
+       //BUKRS
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 1, ranking: #MEDIUM }
+       @EndUserText.label:'Company code'                         //'Buchungskreis'
+       @EndUserText.quickInfo: 'Company code'
+       Company_Code,
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @Consumption.filter.hidden: true
+       @EndUserText.label: 'Name of company'                     //'Name der Firma'-Changed by G25510-9300006151
+       @EndUserText.quickInfo: 'Company code or company name'
+       @ObjectModel.filter.enabled:false
+       _orgdata.CompanyCodeDesc                      as Company_Code_text,
+
+       //IWERK
+       @Consumption.valueHelpDefinition: [{entity:{element: 'Planning_plant', name: '/ETN/C_PM_PLANNING_PLANT_SH'} }]
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label:  'Planning plant'
+       @EndUserText.quickInfo: 'Maintenance planning plant'
+       PlanPlant, //'Instandhaltungsplanungswerk'
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Planning plant Text'
+       @EndUserText.quickInfo: 'Description of planning plant'
+       @ObjectModel.filter.enabled:false
+       _orgdata.PlanningPlantDesc,
+
+       //OrderType
+       @Consumption.valueHelpDefinition: [{entity:{element: 'order_type', name: '/ETN/C_PM_ORDER_TYPE_SH'} }]
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Order type'
+       @EndUserText.quickInfo: 'Order type'
+       Order_Type, //' Auftragsart'
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Order type Text'             //'Auftragsart Text'-Changed by G25510-9300006151
+       @EndUserText.quickInfo: 'Order type Text'
+       @ObjectModel.filter.enabled:false
+       _ordertype.OrderTypeDesc                         as Order_Type_Text,
+
+       //Instandhaltungleistungsart
+       @Consumption.valueHelpDefinition: [{entity:{element: 'Maint_Activity_Type', name: '/ETN/C_PM_MAINTACT_TYPE_V2'} }]
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Maintenance Activity type (ILA)'     //'IH-Leistungsart (ILA)
+       @EndUserText.quickInfo: ' Maintenance activity type'
+       Maint_Activity_Type                           as Maint_Activity_Type,
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label:  'ILA-Description'
+       @EndUserText.quickInfo: 'Description of maintenance activity type'
+       @ObjectModel.filter.enabled:false
+       _ilaDesc.PmActivityTypeDesc                   as Maint_Activity_Type_Text, //'ILA-Bezeichnung
+
+       //Planergruppe
+       @Consumption.valueHelpDefinition: [{entity:{element: 'PlannerGroup', name: '/ETN/C_PM_PLANNER_GROUP_SH'} }]
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Planner group'
+       @EndUserText.quickInfo: 'Planner group for customer service and maintenance'
+       PlanGroup, //'Planergruppe'
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Planner group Text'
+       @EndUserText.quickInfo: 'Name of the maintenance planner group'
+       @ObjectModel.filter.enabled:false
+       _plngroup.innam                               as PlanGroupName, //Planner Group Name
+
+       //Arbeitsplatz
+       @UI.hidden: true
+       @ObjectModel.filter.enabled:false
+       WorkCenterType                                as WorkcenterTyp,
+       @UI.hidden: true                                                          // Insert M73909 CD: 7300011426
+       @ObjectModel.filter.enabled:false
+       Resp_Work_CenterID                            as Resp_Work_CenterID,      // Insert M73909 CD: 7300011426
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Responsible Work center'
+       @EndUserText.quickInfo: 'Responsible work centre for maintenance activities'
+       Responsible_Work_Center, //'Verantwortlicher Arbeitsplatz
+
+       //--> BoC, EAMR-35206, S66123, 07.07.2025
+       //@Search:{ defaultSearchElement: true, fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       //@Consumption.filter.hidden: true
+       //@EndUserText.label: 'Responsible Work center Text'
+       //@EndUserText.quickInfo: 'Description of responsible work center'
+       //@ObjectModel.filter.enabled:false
+       //_workcdesc.WorkCenterDesc                     as Responsible_Work_Center_Text, //'Verantwortlicher Arbeitsplatz Text'
+
+//       @UI.hidden: true      //Performance A76145 nicht verwendet
+//       @Consumption.filter.hidden: true
+//       @ObjectModel.filter.enabled:false
+//       _workcdesc.WorkCenterDesc                     as Responsible_Work_Center_Text, //'Verantwortlicher Arbeitsplatz Text'
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @Consumption.filter.hidden: true
+       @EndUserText.label: 'Responsible Work center Text'
+       @EndUserText.quickInfo: 'Description of responsible work center'
+       @ObjectModel.filter.enabled:false
+       RespWorkCenterText,
+       //<-- EoC, EAMR-35206, S66123, 07.07.2025
+
+       //Betriebsbereich
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.8, ranking: #MEDIUM }
+       @EndUserText.label: 'Plant section'
+       @EndUserText.quickInfo: 'Plant section'
+       PlnSection,                                                    //'Betriebsbereich'-
+
+       @EndUserText.label: 'Plant section Text'
+       @EndUserText.quickInfo: 'Group of employees responsible for the operation area'
+       @ObjectModel.filter.enabled:false
+       _plnsct.fing                                  as PlSectn_text, //'Betriebsbereich Text',
+
+       //PSP-Element
+       @Consumption.valueHelpDefinition: [{entity:{element: 'WBS_Element', name : '/ETN/C_PM_PSP_ELEMENT_SH'} }]
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'WBS-Element'
+       @EndUserText.quickInfo: 'Project structure plan element (WBS element) edited'
+       WBS_Element,
+
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'WBS-Element Text'            //'PSP-Element Text'
+       @EndUserText.quickInfo: ' PS:Short description (first line of text)'   //'PS:Kurzbeschreibung (erste Textzeile)'
+       @ObjectModel.filter.enabled:false
+       WBS_Element_Text,
+
+
+       //Todo:RÜCKBAU New Dev /ETN/C_PM_NOTIFTYPE_NUM_SH
+       @Consumption.valueHelpDefinition: [{entity:{element: 'qmnum', name : '/ETN/C_PM_NOTIFTYPE_NUM_SH'} }]
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 1, ranking: #MEDIUM }
+       @EndUserText.label: 'Assigned notification'
+       Notification,
+
+
+       //Technisches Objekt
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 1, ranking: #MEDIUM }
+       @EndUserText.label: 'Equipment'
+       @EndUserText.quickInfo: 'Equipment number'
+       @ObjectModel.filter.enabled:false
+       Equipment,
+
+       //--> BoC, EAMR-35834 (7300013450), S66123, 27.06.2025
+       @UI.hidden: true
+       @Consumption.filter.hidden:true
+       @ObjectModel.filter.enabled: false
+       @EndUserText.label: 'Equipment Label'
+       @EndUserText.quickInfo: 'Equipment Label'
+       EquipmentLabel,
+       //<-- EoC, EAMR-35834 (7300013450), S66123, 27.06.2025
+
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Equipment Text'
+       @EndUserText.quickInfo: 'Description of technical object'
+       @ObjectModel.filter.enabled:true                       //filter enabled set to true  M91512 EAMR-37448
+       Equipment_Text,
+
+
+       @EndUserText.label: 'Equipment Object type'
+       @EndUserText.quickInfo: 'Type of technical object'
+       @ObjectModel.filter.enabled:false
+       EquiEqart,
+
+       @EndUserText.label: 'Equipment Object type Text'
+       @EndUserText.quickInfo: 'Test for object type'
+       @ObjectModel.filter.enabled:false
+       _techobjEQdesc.eartx                          as EquiEqart_text, //'Equipment Objektart'
+
+
+       @EndUserText.label: 'Functional location (internal format)'
+       @EndUserText.quickInfo: 'Labelling of the functional location'
+       @ObjectModel.filter.enabled:false
+       Function_Location, //'Technischer Platz(Internes Format)'
+
+       @Search:{ defaultSearchElement: true, fuzzinessThreshold: 1, ranking: #MEDIUM }
+       @EndUserText.label: 'Functional location'
+       @ObjectModel.filter.enabled:false
+       FunctionLocationLabel                         as FunctionLocationLabel,
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Functional location Text'
+       @EndUserText.quickInfo: 'Description of functional location'
+       @ObjectModel.filter.enabled:true                 //filter enabled set to true  M91512 EAMR-37448
+       Function_Loc_Description,
+
+       //-->EAMR-37213 (9300007465), Top Functional Location with Sort, S66123, 05.09.2025
+       //-->EAMR-35071, Get the Top Functional Location in the Hierarchy, S66123, 26.06.2025
+       //@EndUserText.label: 'Top Functional Location'
+       //@ObjectModel.virtualElement: true
+       //@ObjectModel.virtualElementCalculatedBy: 'ABAP:/ETN/CL_PM_TOPFUNCLOC_VE'
+       //cast( '' as char40 )                          as TopFuncLocAC,
+       //@EndUserText.label: 'Top Functional Location Text'
+       //@ObjectModel.virtualElement: true
+       //@ObjectModel.virtualElementCalculatedBy: 'ABAP:/ETN/CL_PM_TOPFUNCLOC_VE'
+       //cast( '' as char40 )                          as TopFuncLocDescAC,
+       @EndUserText.label: 'Top functional location'
+       _TopFuncLocText.TopFuncLoc_Ext,
+       @EndUserText.label: 'Top functional location text'
+       _TopFuncLocText.TopFuncLocText,
+       //<--EAMR-35071, Get the Top Functional Location in the Hierarchy, S66123, 26.06.2025
+       //<--EAMR-37213 (9300007465), Top Functional Location with Sort, S66123, 05.09.2025
+
+       @EndUserText.label: 'Functional location Object type'
+       @EndUserText.quickInfo: '  Type of technical object'
+       @ObjectModel.filter.enabled:false
+       FunclocEqart, //'Technischer Platz Objektart'
+
+       @EndUserText.label: 'Functional location Object type Text'
+       @EndUserText.quickInfo: '  Test for object type'
+       @ObjectModel.filter.enabled:false
+       _techobjTPdesc.eartx                          as FunclocEqart_text, //'Technischer Platz Objektart Text'
+
+       //AbC + ID-Oldsystem
+       @Search:{ defaultSearchElement: false , fuzzinessThreshold: 0.8, ranking: #MEDIUM }
+       @EndUserText.label: 'ABC-Indicator of Technical object'
+       @EndUserText.quickInfo: 'ABC-Indicator of Technical object'
+       ABC_Indicator,
+
+       @EndUserText.label: 'ABC-Indicator of Technical object Text'   //'ABC-Kennzeichen zum technischen Objekt Text'
+       @EndUserText.quickInfo: 'ABC-Indicator of Technical object Text'
+       @ObjectModel.filter.enabled:false
+       _abcDesc.ABCIndicatorDesc                     as ABC_Indicator_Text,
+
+       //       @EndUserText.label: 'ID Legacy system'                 //'ID-Altsystem'-Changed by G25510-9300006151
+       //       @EndUserText.quickInfo: 'ID Legacy system'             //'ID Altsystem'             //Added J59525 9300005639
+       //       ID_OldSystem                                     as ID_oldsystem,
+
+
+       //Netzbau Maßnahmennummer
+
+       @Consumption.valueHelpDefinition: [{ entity:{ element: 'CostId', name:    '/ETN/C_PM_COSTID_VH'} } ]
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Measure'                 //'Maßnahme'                       // EAMR-40037 M73909 04.12.2025
+       @EndUserText.quickInfo: 'Measure'             //'Maßnahme'                       // EAMR-40037 M73909 04.12.2025
+       CostId,
+       
+       @ObjectModel.filter.enabled:false                                                // EAMR-40037 M73909 04.12.2025
+       @EndUserText.label: 'Measure Description'      //'Maßnahme Beschreibung'
+       @EndUserText.quickInfo: 'Measure Description'  //'Beschreibung der Maßnahme'
+       CostDescr,
+
+       //INCC
+       @EndUserText.label: 'End of delivery/service'                  //'Ende Lieferung/Leistung'
+       @EndUserText.quickInfo: 'End of delivery/service'
+       _incc.DSEDAT                                  as EndDateDeliveryService,
+
+       @Consumption.valueHelpDefinition: [{ entity:{ element: 'ExecutionType', name:    '/ETN/C_EXCECUTION_TYPE_VH'} } ]
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Execution Type' //'Ausführungsart
+       ExecutionType,
+       @EndUserText.label: 'Execution Type Description' //'Ausführungsartbezeichnung
+       ExecutionTypeDesc,
+
+
+
+       // Zentrale Bestellung TODO RÜCKBAU: New Dev
+       @EndUserText.label:    'Central supplier'                  //'Zentraler Lieferant'    // 'Central Supplier'-Changed by G25510-9300006151
+       @EndUserText.quickInfo: 'Central supplier'                 //'Zentraler Lieferant'   // 'Central Supplier'
+       @Consumption: { valueHelpDefinition: [{  entity: { element: 'CentralSupplier',  //Added by: A76145 EAMR-27614
+                                                           name:    '/ETN/PM_C_SUPPLIER'
+                                                           }    } ] }
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.8, ranking: #MEDIUM }
+       _pcentral.Supplier                            as CentralSupplier,
+
+       @EndUserText.label: 'Requestor'                    //'Anforderer'
+       @EndUserText.quickInfo: 'Requestor'
+       _pcentral.Requester                           as Requester,
+
+       @EndUserText.label: 'Central purchase order'                //'Zentrale Bestellung'       // 'Central PurchaseNo'-Changed by G25510-9300006151
+       @EndUserText.quickInfo: 'Central purchase order'            //'Zentrale Bestellung'   // 'Central PurchaseNo'
+       @Consumption: { valueHelpDefinition: [{  entity: { element: 'PurchaseNo',  //Added by: A76145 EAMR-23529
+                                                           name:    '/ETN/C_PM_CENTRAL_PURCHASE_VH'
+                                                           }    } ] }
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.8, ranking: #MEDIUM }
+       _pcentral.PurchaseNo                          as PurchaseNo,
+
+
+       //Datumsfelder und Termine
+
+       //Erstellt/Geändert am/von
+       @Search:{ defaultSearchElement: false } //, fuzzinessThreshold: 1, ranking: #HIGH } // false
+       @EndUserText.label: 'Creation date'
+       created_on                                    as Created_On, //erstellt am
+
+       @Consumption.valueHelpDefinition: [{ entity:{ element: 'UserName', name: '/ETN/C_PM_USER_VH'}}]
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Creator'
+       @EndUserText.quickInfo: 'Name of the clerk who added the object'
+       Entered_By                                    as Entered_By, //erstellt von
+
+       @EndUserText.label: 'Creator (name)'                       //Erfasser
+       @EndUserText.quickInfo: ' Full name of the person'
+       @ObjectModel.filter.enabled:false
+       _createdby.FullName                           as FullName,
+
+       @EndUserText.label: 'Date of last change'
+       Date_of_Change                                as Date_of_Change, //'Datum der letzten Änderung'
+
+       @Consumption.valueHelpDefinition: [{ entity:{ element: 'UserName', name:    '/ETN/C_PM_USER_VH'}}]
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Last Person-in-charge'
+       @EndUserText.quickInfo: 'Name of the clerk who changed the object'
+       Changed_By                                    as Changed_By, //'Letzter Bearbeiter
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Last Person-in-charge (name)'
+       @EndUserText.quickInfo: 'Full name of the person'
+       @ObjectModel.filter.enabled:false
+       _changedby.FullName                           as Changed_By_Name, //'Letzter Bearbeiter (Name)'
+
+       //Ecktermine
+       @Search:{ defaultSearchElement: false } //, fuzzinessThreshold: 1, ranking: #MEDIUM } //False
+       @EndUserText.label: 'Basic start date'
+       @EndUserText.quickInfo: 'Basic start date'
+       Start_Date                                    as Start_Date, //Eckstarttermin
+
+       @Search:{ defaultSearchElement: false } //, fuzzinessThreshold: 1, ranking: #MEDIUM } //False
+       @EndUserText.label: 'Basic finish date'
+       @EndUserText.quickInfo: 'Basic finish date'
+       Finish_Date                                   as Finish_Date, //Eckendetermin
+
+       //Scheduled
+       @Consumption.filter.hidden: true
+       @EndUserText.label: 'Scheduled start'          //'Term.Start'-Changed by G25510-9300006151
+       @EndUserText.quickInfo: 'Scheduled start (time)'
+       @ObjectModel.filter.enabled:false
+       Prod_Start_Time                               as Prod_Start_Time,
+
+       @Consumption.filter.hidden: true
+       @EndUserText.label: 'Scheduled finish'            //'Term.Ende'-Changed by G25510-9300006151
+       @EndUserText.quickInfo: 'Scheduled end (time)'    //'Terminiertes Ende (Uhrzeit)'         //Added J59525 9300005639
+       @ObjectModel.filter.enabled:false
+       Prod_Finish_Time                              as Prod_Finish_Time,
+
+
+
+       //Status - SystemStatus and UserStatus
+       @EndUserText.label: 'System status'
+       @EndUserText.quickInfo: 'System status'
+       @Consumption: { valueHelpDefinition: [{  entity: { element: 'System_Status', name: '/ETN/I_SYS_STAT'  }    } ] }
+       @ObjectModel.virtualElement: true
+       @ObjectModel.readOnly: true
+       @ObjectModel.virtualElementCalculatedBy: 'ABAP:/ETN/CL_PM_VDM_IH_STATUS'     //  @ObjectModel.virtualElementCalculatedBy: 'ABAP:/ETN/CL_PM_VDM_STAT_ORDER'
+       @ObjectModel.filter.transformedBy:       'ABAP:/ETN/CL_PM_VDM_IH_STATUS'     //   @ObjectModel.filter.transformedBy: 'ABAP:/ETN/CL_PM_VDM_STAT_ORDER'      
+       cast( '' as char80)                           as System_Status,
+
+
+
+       @Consumption: { valueHelpDefinition: [{  entity: { element: 'UserStatus', name:    '/ETN/I_USER_STAT'  }    } ] }
+       @EndUserText.label: 'User status'
+       @EndUserText.quickInfo: 'User status'
+       @ObjectModel.virtualElement: true
+       @ObjectModel.readOnly: true
+       @ObjectModel.virtualElementCalculatedBy: 'ABAP:/ETN/CL_PM_VDM_IH_STATUS'     //  @ObjectModel.virtualElementCalculatedBy: 'ABAP:/ETN/CL_PM_VDM_STAT_ORDER'
+       @ObjectModel.filter.transformedBy:       'ABAP:/ETN/CL_PM_VDM_IH_STATUS'     //   @ObjectModel.filter.transformedBy: 'ABAP:/ETN/CL_PM_VDM_STAT_ORDER'      
+       cast('' as abap.char(80))                     as UserStatus,
+
+
+       @ObjectModel.virtualElement: true
+       @ObjectModel.virtualElementCalculatedBy:  'ABAP:/ETN/CL_PM_VDM_STAT_ORDER'
+       cast( '' as abap.char(80))                    as SystemStatusIntern,
+
+       @ObjectModel.virtualElement: true
+       @ObjectModel.virtualElementCalculatedBy:  'ABAP:/ETN/CL_PM_VDM_STAT_ORDER'
+       cast( '' as abap.char(80))                    as UserStatusIntern,
+
+       //Adresse
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 1, ranking: #MEDIUM }
+       @EndUserText.label: 'Postcode' //'Postleitzahl'
+       _adr.PostCode                                 as Post_Code1,
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'City'           //'Ort'
+       @EndUserText.quickInfo: 'City' //' Ort'
+       _adr.City                                     as City1,
+
+
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'District'            //'Ortsteil'
+       @EndUserText.quickInfo: 'District'        //' Ortsteil'
+       _adr.District                                 as City2, //District
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Street'                  //'Straße'
+       @EndUserText.quickInfo: 'Street' //' Straße'
+       _adr.Street                                   as Street,
+
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'House number'            //'Hausnummer'
+       @EndUserText.quickInfo: 'House number'        //' Hausnummer'
+       _adr.HouseNumber                              as House_Number,
+
+
+       @Search:{ defaultSearchElement: true , fuzzinessThreshold: 0.7, ranking: #MEDIUM }
+       @EndUserText.label: 'Addition to the house number'        //'Hausnummerzusatz'
+       @EndUserText.quickInfo: 'Addition to the house number'    //' Hausnummerzusatz'
+       _adr.HouseNumber2                             as House_Supplement,
+
+
+
+       //Kosten - Overview
+
+       _overview_ist_cost.waers,
+       @EndUserText.label: 'Actual costs'                 //'Istkosten' Changed by G25510-9300006151
+       @EndUserText.quickInfo: 'Actual costs'
+       @Semantics.amount.currencyCode: 'waers'
+       _overview_ist_cost.PlanCost                   as TotalActualCost,
+
+       @EndUserText.label: 'Planned costs'                    //'Plankosten'  Changed by G25510-9300006151
+       @EndUserText.quickInfo: 'Planned costs'
+       @Semantics.amount.currencyCode: 'waers'
+       _overview_plan_cost.PlanCost                  as TotalPlanCost,
+
+       //   Plangruppe+Plangruppenzähler
+       @Consumption.valueHelpDefinition: [{ entity:{ name : '/ETN/C_TSKLSTGRP_VH', element: 'TasklistGroup' } }]
+       @Search.defaultSearchElement: true
+       @EndUserText.label: 'Task Group'           //'Plangruppe' //Changed by:A76145
+       TasklistGroup,
+
+       @EndUserText.label: 'Task Group Counter'        //'Plangruppenzähler' //Changed by:A76145
+       @ObjectModel.filter.enabled:false
+       TasklistGroupCounter,
+
+       @EndUserText.label: 'Group Counter'        //'Plangruppenzähler' //Changed by:A76145
+       @UI.hidden: true
+       @Consumption.valueHelpDefinition: [{ entity:{ name : '/ETN/C_TASKLISTGROUP_VH', element:      'TasklistConcat' } }]
+       concat( TasklistGroup, TasklistGroupCounter ) as TasklistConcat,
+        
+        
+       //Start of EAMR-40053 M91512 17.12.25
+       @EndUserText.label: 'Maintenance Plan'  
+       @ObjectModel.filter.enabled:true
+       MaintPlan                                     as MaintPlan,      // Wartungsplan
+       
+       
+       @EndUserText.label: 'Maintenance Item' 
+       @ObjectModel.filter.enabled:true
+       MaintItem                                     as MaintItem,     // Wartungsplanposition
+       //End of EAMR-40053 M91512 17.12.25 
+        
+       @UI.hidden: true
+       //     @Consumption: { valueHelpDefinition: [{  entity: { element: 'PartnerConcat', name: '/ETN/I_PARTNER_USR_ALL'  }  } ] }
+       @EndUserText.label: 'Partner'
+       @EndUserText.quickInfo: 'Partner with function'
+       @ObjectModel.virtualElement: true
+       //     @ObjectModel.virtualElementCalculatedBy:  'ABAP:/ETN/CL_PM_VDM_STAT_ORDER'
+       @ObjectModel.filter.transformedBy: 'ABAP:/ETN/CL_PM_VDM_STAT_ORDER'
+       cast('' as abap.char(15))                     as PartnerFunction,
+
+
+       OrderAdressNo,
+
+       //       @UI.hidden: true                     //Del EAMR-35183 M73909 27.11.2025
+       @ObjectModel.filter.enabled:false      //Add EAMR-35183 M73909 27.11.2025
+       @Consumption.hidden                    //Add EAMR-35183 M73909 27.11.2025
+       PlnSectionWerks,
+
+
+       //      Responsible_Work_Center as WorkcenterId, // change M73909 Defect: 9200018037
+       WorkCenterTo.arbpl                            as WorkcenterId, // Insert M73909 Defect: 9200018037
+       // InternalID for Workcenter
+       //       @UI.hidden: true
+       //       WorkCenterToIntern,
+
+       @EndUserText.label: 'WorkCenter Text'
+       _WorkCenterDescription.RespWorkCenterText     as WorkCenterText,
+
+       @EndUserText.label: 'Sort Field'
+       SortField,
+
+       @ObjectModel.filter.enabled:false                                                  //EAMR-17902
+       @EndUserText.label: 'MC Client' //'Kundennummer AG'            //EAMR-17902
+       CustomerNumberAG                              as CustomerNumberAG,
+
+       @ObjectModel.filter.enabled:false                                                  //EAMR-17902
+       @EndUserText.label: 'MC Invoice recipient'           //'Kundennummer RE'           //EAMR-17902
+       @EndUserText.quickInfo: 'MC Invoice recipient'       //'Kundennummer RE'           //EAMR-17902
+       CustomerNumberRE                              as CustomerNumberRE,                 //EAMR-17902
+
+       @ObjectModel.filter.enabled:false                                                  //EAMR-17902
+       @EndUserText.label: 'MC Payer'                      //'Kundennummer RG'            //EAMR-17902
+       @EndUserText.quickInfo: 'MC Payer'                  //'Kundennummer RG'            //EAMR-17902
+       CustomerNumberRG                              as CustomerNumberRG,                 //EAMR-17902
+
+       @ObjectModel.filter.enabled:false                                                  //EAMR-17902
+       @EndUserText.label: 'MC Goods recipient'               //'Kundennummer WE'            //EAMR-17902
+       @EndUserText.quickInfo: 'MC Goods recipient'           //'Kundennummer WE'            //EAMR-17902
+       CustomerNumberWE                              as CustomerNumberWE, //EAMR-17902
+
+        
+
+
+//       _sysconcat,
+//       _usrconcat,
+        _systemstatus,
+        _userstatus,
+        
+//       _Tasklist,
+       _partner
+}
