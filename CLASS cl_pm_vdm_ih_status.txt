@@ -296,8 +296,38 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
 
     "*------------------------------------------------------------------*
     "* Schritt 1: Feldname analysieren
+    "*   Primär: Pattern im Feldnamen (z.B. OrderSysStatus → ORDER + SYS)
+    "*   Fallback: Pattern im Entity-Namen, wenn Feldname generisch
+    "*             (z.B. System_Status → kein Objekttyp im Feldnamen
+    "*              → Entity /ETN/C_AC_ORDER_LIST enthält ORDER → ORI)
     "*------------------------------------------------------------------*
     DATA(ls_mapping) = me->parse_field_name( to_upper( iv_element ) ).
+
+    IF ls_mapping-is_valid = abap_false.
+      DATA(lv_entity_upper) = to_upper( iv_entity ).
+      DATA(lv_elem_upper)   = to_upper( iv_element ).
+
+      ls_mapping-objecttype = COND #(
+        WHEN lv_entity_upper CS 'ORDER'                                   THEN gc_objecttype-order
+        WHEN lv_entity_upper CS 'OPER'                                    THEN gc_objecttype-operation
+        WHEN lv_entity_upper CS 'CAPA' OR lv_entity_upper CS 'REQ'        THEN gc_objecttype-capacity
+        WHEN lv_entity_upper CS 'EQUI'                                    THEN gc_objecttype-equipment
+        WHEN lv_entity_upper CS 'IFLOC'
+          OR lv_entity_upper CS 'FUNCLOC'
+          OR lv_entity_upper CS 'FLOC'                                    THEN gc_objecttype-funcloc
+        WHEN lv_entity_upper CS 'NOTIF'                                   THEN gc_objecttype-notification
+      ).
+
+      IF ls_mapping-objecttype IS NOT INITIAL.
+        IF lv_elem_upper CS 'SYSTEM' OR lv_elem_upper CS 'SYS'.
+          ls_mapping-is_valid      = abap_true.
+          ls_mapping-is_userstatus = abap_false.
+        ELSEIF lv_elem_upper CS 'USER' OR lv_elem_upper CS 'USR'.
+          ls_mapping-is_valid      = abap_true.
+          ls_mapping-is_userstatus = abap_true.
+        ENDIF.
+      ENDIF.
+    ENDIF.
 
     CHECK ls_mapping-is_valid = abap_true.
 
