@@ -109,12 +109,13 @@ private section.
       !IS_MAPPING type TY_FIELD_MAPPING
     returning
       value(RT_STATUSCODES) type TY_STATUSCODE_TAB .
-  "! Baut OR-verknüpfte Condition aus StatusCode-Liste
+  "! Baut OR-verknüpfte Condition aus StatusCode-Liste, gewrappt in EXISTS
+  "! IV_ASSOC_PATH: z.B. '_systemstatus' → Lambda = 'SYSTEMSTATUS'
   methods BUILD_STATUS_CONDITION
     importing
-      !IT_STATUSCODES   type TY_STATUSCODE_TAB
-      !IO_CFAC          type ref to IF_SADL_SIMPLE_COND_FACTORY
-      !IV_IS_USERSTATUS type ABAP_BOOL
+      !IT_STATUSCODES type TY_STATUSCODE_TAB
+      !IO_CFAC        type ref to IF_SADL_SIMPLE_COND_FACTORY
+      !IV_ASSOC_PATH  type STRING
     returning
       value(RO_CONDITION) type ref to IF_SADL_COND_PROVIDER_GENERIC .
   methods CHECK_CACHE_LOADED
@@ -144,32 +145,35 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
   METHOD build_status_condition.
 
     "*------------------------------------------------------------------*
-    "* Baut OR-verknüpfte Condition aus Statuscode-Liste.
+    "* Baut OR-verknüpfte Condition aus Statuscode-Liste und wrappt
+    "* das Ergebnis in EXISTS(...) – analog CL_EAM_STS_EXIT.
     "*
-    "* Assoziationsnamen sind in allen Hauptviews einheitlich:
-    "*   _systemstatus  →  Systemstatus  (nur Status-Feld)
-    "*   _userstatus    →  Anwenderstatus (Status + StatusProfile)
+    "* Lambda = Assoziationsname ohne führenden '_', uppercase:
+    "*   '_systemstatus' → Lambda = 'SYSTEMSTATUS'
+    "*   '_userstatus'   → Lambda = 'USERSTATUS'
     "*
-    "* Systemstatus:
-    "*   _systemstatus.Status = 'I0076'
+    "* Innerhalb EXISTS werden Felder über Lambda referenziert:
+    "*   SYSTEMSTATUS.Status = 'I0076'
+    "*   USERSTATUS.Status = 'E0001' AND USERSTATUS.StatusProfile = 'YPM01'
     "*
-    "* Anwenderstatus (Profil je Auftragsart!):
-    "*   (_userstatus.Status = 'E0001' AND _userstatus.StatusProfile = 'YPM01')
-    "*   OR (_userstatus.Status = 'E0003' AND _userstatus.StatusProfile = 'YPM02')
+    "* SADL erzeugt daraus:
+    "*   EXISTS ( SELECT 1 FROM _systemstatus AS SYSTEMSTATUS
+    "*            WHERE SYSTEMSTATUS.Status = 'I0076' )
     "*------------------------------------------------------------------*
 
-    DATA(lv_status_path)  = COND string(
-      WHEN iv_is_userstatus = abap_true THEN '_userstatus.Status'
-      ELSE                                   '_systemstatus.Status' ).
+    " Lambda = Assoz.-Name ohne '_', uppercase  (wie CL_EAM_STS_EXIT)
+    DATA(lv_lambda)         = to_upper( iv_assoc_path+1 ).
+    DATA(lv_status_field)   = lv_lambda && '.Status'.
+    DATA(lv_profile_field)  = lv_lambda && '.StatusProfile'.
 
     LOOP AT it_statuscodes ASSIGNING FIELD-SYMBOL(<code>).
 
       DATA(lo_single) = COND #(
         WHEN <code>-statusprofile IS NOT INITIAL
-        THEN io_cfac->element( lv_status_path )->equals( <code>-statuscode )->and( io_condition =
-                        io_cfac->element( '_userstatus.StatusProfile' )->equals( <code>-statusprofile )
+        THEN io_cfac->element( lv_status_field )->equals( <code>-statuscode )->and( io_condition =
+                        io_cfac->element( lv_profile_field )->equals( <code>-statusprofile )
                     )
-        ELSE io_cfac->element( lv_status_path )->equals( <code>-statuscode )
+        ELSE io_cfac->element( lv_status_field )->equals( <code>-statuscode )
       ).
 
       ro_condition = COND #(
@@ -179,6 +183,10 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
       ).
 
     ENDLOOP.
+
+    " EXISTS-Wrapper: SADL setzt daraus die Subquery auf die Assoziation
+    ro_condition = ro_condition->exists( iv_name = lv_lambda
+                                         iv_path = iv_assoc_path ).
 
   ENDMETHOD.
 
@@ -309,25 +317,34 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
     ENDIF.
 
     "*------------------------------------------------------------------*
-    "* Schritt 3: Operator-Handling
+    "* Schritt 3: Assoziationspfad + Lambda ableiten
+    "*   Lambda = Assoz.-Name ohne '_', uppercase (wie CL_EAM_STS_EXIT)
+    "*   '_systemstatus' → 'SYSTEMSTATUS'
+    "*   '_userstatus'   → 'USERSTATUS'
     "*------------------------------------------------------------------*
-    DATA(lv_status_path) = COND string(
-      WHEN ls_mapping-is_userstatus = abap_true THEN '_userstatus.Status'
-      ELSE                                            '_systemstatus.Status' ).
+    DATA(lv_assoc_path) = COND string(
+      WHEN ls_mapping-is_userstatus = abap_true THEN '_userstatus'
+      ELSE                                            '_systemstatus' ).
 
+    DATA(lv_lambda) = to_upper( lv_assoc_path+1 ).
+
+    "*------------------------------------------------------------------*
+    "* Schritt 4: Operator-Handling
+    "*------------------------------------------------------------------*
     CASE lv_operator_adjusted.
 
       WHEN if_sadl_exit_filter_transform~co_operator-equals.
 
-        " ── Leerstring → NULL-Check ───────────────────────────────────
+        " ── Leerstring → EXISTS( Status IS NULL ) ─────────────────────
         IF condense( val = iv_value ) = ''.
-          ro_condition = lo_cfac->element( lv_status_path )->is_null( ).
+          ro_condition = lo_cfac->element( lv_lambda && '.Status' )->is_null(
+                         )->exists( iv_name = lv_lambda iv_path = lv_assoc_path ).
 
-        " ── Zu lang → Kein gültiger Statuscode (max 4 Zeichen) ────────
+        " ── Zu lang → kein gültiger Statuscode (max 4 Zeichen) ────────
         ELSEIF strlen( lv_value_adjusted ) > 4.
           ro_condition = lo_cfac->false( ).
 
-        " ── Normaler Filter → Lookup + Condition ───────────────────────
+        " ── Normaler Filter → Lookup → EXISTS( Status = 'I0076' ) ─────
         ELSE.
 
           DATA(lt_statuscodes) = me->determine_statuscode(
@@ -339,9 +356,9 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
             ro_condition = lo_cfac->false( ).
           ELSE.
             ro_condition = me->build_status_condition(
-              it_statuscodes   = lt_statuscodes
-              io_cfac          = lo_cfac
-              iv_is_userstatus = ls_mapping-is_userstatus
+              it_statuscodes = lt_statuscodes
+              io_cfac        = lo_cfac
+              iv_assoc_path  = lv_assoc_path
             ).
           ENDIF.
 
@@ -352,12 +369,13 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
         ro_condition = lo_cfac->false( ).
 
       WHEN if_sadl_exit_filter_transform~co_operator-is_null.
-        ro_condition = lo_cfac->element( lv_status_path )->is_null( ).
+        " OData $filter=Field eq null → direkte Pfadreferenz, kein EXISTS
+        " (analog CL_EAM_STS_EXIT: lv_element_w_path ohne ->exists())
+        ro_condition = lo_cfac->element( lv_assoc_path && '.Status' )->is_null( ).
 
       WHEN OTHERS.
-        " LT, GT, NE und unbekannte Operatoren ergeben bei Status keinen Sinn.
-        " NE wird von SADL selbst behandelt: map_atom wird mit EQ aufgerufen,
-        " SADL erzeugt daraus NOT EXISTS(...) - kein eigener WHEN-Zweig nötig.
+        " LT, GT und unbekannte Operatoren ergeben bei Status keinen Sinn.
+        " NE: SADL ruft map_atom mit EQ auf und erzeugt selbst NOT EXISTS.
         ro_condition = lo_cfac->false( ).
 
     ENDCASE.
