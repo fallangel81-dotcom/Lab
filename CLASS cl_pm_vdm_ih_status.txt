@@ -41,16 +41,10 @@ private section.
       is_valid      type abap_bool,
     end of ty_field_mapping .
   types:
-    "! Bucket-Schlüssel für Lazy-Loading-Tracking
-    begin of ty_bucket_key,
+    begin of ty_cache_loaded,
       objecttype    type j_obtyp,
       is_userstatus type abap_bool,
-    end of ty_bucket_key .
-  types:
-    begin of ty_cache_loaded,
-           objecttype    type j_obtyp,
-           is_userstatus type abap_bool,
-         end of ty_cache_loaded .
+    end of ty_cache_loaded .
   types:
     "! Zwischenergebnis für calculate: STRING_AGG je ObjectKey
     begin of ty_status_result,
@@ -60,8 +54,7 @@ private section.
       status_concat type string,
     end of ty_status_result .
   types:
-    ty_status_result_tab type hashed table of ty_status_result
-      with unique key objecttype is_userstatus objectkey .
+    ty_status_result_tab type table of ty_status_result with key objecttype is_userstatus objectkey .
 
   "*------------------------------------------------------------------*
   "* CLASS-DATA = Cache (geteilt über alle Instanzen auf Work Process)
@@ -77,8 +70,8 @@ private section.
   "*------------------------------------------------------------------*
   class-data GT_CACHE type TY_STATUS_CACHE_TAB .
   class-data:
-    gt_loaded_buckets type sorted table of ty_bucket_key with unique key objecttype is_userstatus .
-  class-data:
+*  class-data:
+*    gt_loaded_buckets type sorted table of ty_bucket_key with unique key objecttype is_userstatus .
     gt_cache_loaded type standard table of ty_cache_loaded with default key .
   constants:
     "*------------------------------------------------------------------*
@@ -100,6 +93,7 @@ private section.
   methods PARSE_FIELD_NAME
     importing
       !IV_ELEMENT type STRING
+      !IV_ENTITY type STRING optional
     returning
       value(RS_MAPPING) type TY_FIELD_MAPPING .
   "! Stellt Cache-Bucket sicher + Lookup
@@ -109,13 +103,13 @@ private section.
       !IS_MAPPING type TY_FIELD_MAPPING
     returning
       value(RT_STATUSCODES) type TY_STATUSCODE_TAB .
-  "! Baut OR-verknüpfte Condition aus StatusCode-Liste, gewrappt in EXISTS
-  "! IV_ASSOC_PATH: z.B. '_systemstatus' → Lambda = 'SYSTEMSTATUS'
+  "! Baut OR-verknüpfte Condition aus StatusCode-Liste  gewrappt in EXISTS
   methods BUILD_STATUS_CONDITION
     importing
+      !IV_IS_USERSTATUS type ABAP_BOOL optional
       !IT_STATUSCODES type TY_STATUSCODE_TAB
-      !IO_CFAC        type ref to IF_SADL_SIMPLE_COND_FACTORY
-      !IV_ASSOC_PATH  type STRING
+      !IV_ASSOC_PATH type STRING
+      !IO_CFAC type ref to IF_SADL_SIMPLE_COND_FACTORY
     returning
       value(RO_CONDITION) type ref to IF_SADL_COND_PROVIDER_GENERIC .
   methods CHECK_CACHE_LOADED
@@ -128,10 +122,9 @@ private section.
   methods LOAD_USR_STATUS_BY_OBJTYP
     importing
       !IV_OBJECTTYPE type J_OBTYP .
-  "! Liefert CDS-View-Name für Bulk-SELECT in calculate
   methods RESOLVE_CDS_VIEW
     importing
-      !IV_OBJECTTYPE    type J_OBTYP
+      !IV_OBJECTTYPE type J_OBTYP
       !IV_IS_USERSTATUS type ABAP_BOOL
     returning
       value(RV_VIEW) type STRING .
@@ -142,11 +135,137 @@ ENDCLASS.
 CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
 
 
-  METHOD build_status_condition.
+method parse_field_name.
+  "*------------------------------------------------------------------*
+  "* Pattern-Erkennung - Position im Feldnamen/Viewnamen egal!
+  "*
+  "* Drei Bedingungen (alle müssen erfüllt sein):
+  "*   1. Pflicht:    'STAT' enthalten
+  "*   2. Objekttyp: ORDER / EQUI / xFLOC / OPER / NOTIF / CAPA
+  "*   3. Typ:       SYS/SYSTEM = Systemstatus, USR/USER = Anwenderstatus
+  "*
+  "* Reihenfolge bei Objekttyp:
+  "*   Spezifischere Pattern zuerst (IFLOC vor FLOC)
+  "*
+  "* Reihenfolge bei Status-Typ: spez. Pattern
+  "*   SYSTEM vor SYS (SYSTEM enthält SYS als Substring!)
+  "*   USER   vor USR (analog)
+  "*------------------------------------------------------------------*
+
+  "Ergebnis der Prüfung default-mäßig auf False
+  rs_mapping-is_valid = abap_false.
+
+  "---------------------------------------------------------------"
+  "- Convert to Großbuchstaben damit man besser vergleichen kann -"
+  "---------------------------------------------------------------"
+  data(lv_field)  = to_upper( iv_element ).   "e.g  OrderSysStatus
+  data(lv_entity) = to_upper( iv_entity ).    "e.g /ETN/C_AC_ORDER_LIST
+
+  "*---------------------------------------------------------------------------------------------------*
+  "* Check: STAT muss enthalten sein - sonst False-Positive möglich (z.B. 'ORDERTYPE', 'EQUIPMENT')  --*
+  "*---------------------------------------------------------------------------------------------------*
+  check lv_field cs 'STAT'.
+
+  "*--------------------------------------------------------------------------------------------------*
+  "* Objekttyp aus View-Feldnamen erkennen und zuweisen. Spezifische zuerst IFLOC/FUNCLOC vor FLOC  --*
+  "*--------------------------------------------------------------------------------------------------*
+  data lv_objecttype type j_obtyp.
+
+  lv_objecttype = cond #( when lv_field    cs 'NOTIF'     then gc_objecttype-notification "QMI
+                          when lv_field    cs 'ORDER'     then gc_objecttype-order        "ORI
+                          when lv_field    cs 'OPER'      then gc_objecttype-operation    "OVG
+                          when lv_field    cs 'CAPA'
+                               or lv_field cs 'REQ'       then gc_objecttype-capacity     "O2C
+
+                          when lv_field    cs 'EQUI'      then gc_objecttype-equipment    "EQI
+                          when lv_field    cs 'IFLOC'
+                               or lv_field cs 'FUNCTLOC'
+                               or lv_field cs 'FUNCLOC'
+                               or lv_field cs 'FLOC'      then gc_objecttype-funcloc      "IFL
+                                ).
+
+  "- If no objecttype was found by fieldname....
+  if lv_objecttype is initial.
+    "- Try to get it by requested View -"
+    rs_mapping-objecttype = cond #( when lv_entity    cs 'NOTIF'     then gc_objecttype-notification "QMI
+                            when lv_entity    cs 'ORDER'     then gc_objecttype-order        "ORI
+                            when lv_entity    cs 'OPER'      then gc_objecttype-operation    "OVG
+                            when lv_entity    cs 'CAPA'
+                              or lv_entity    cs 'REQ'       then gc_objecttype-capacity     "O2C
+
+                            when lv_entity   cs 'EQUI'       then gc_objecttype-equipment    "EQI
+                            when lv_entity   cs 'IFLOC'
+                                or lv_entity cs 'FUNCTLOC'
+                                or lv_entity cs 'FUNCLOC'
+                                or lv_entity cs 'FLOC'       then gc_objecttype-funcloc      "IFL
+                          ).
+
+  else.
+    "Objecttype was found
+    rs_mapping-objecttype = lv_objecttype.
+  endif.
+
+  "Objekttype wurde gefunden
+  if rs_mapping-objecttype is not initial.
+
+    "*-----------------------------------------------------------------------*
+    "* Status-Typ aus View-Feldnamen erkennen - SYSTEM/SYS vs. USER/USR    --*
+    "*-----------------------------------------------------------------------*
+    if lv_field cs 'SYSTEM' or lv_field cs 'SYS'.
+
+      rs_mapping-is_valid      = abap_true.     "successfully mapped
+      rs_mapping-is_userstatus = abap_false.
+
+
+    elseif lv_field cs 'USER' or lv_field cs 'USR'.
+
+      rs_mapping-is_valid      = abap_true.   "successfully mapped
+      rs_mapping-is_userstatus = abap_true.
+
+    else." STAT + Objekttyp erkannt, aber kein Status-Typ  " Beispiel: 'OrderStatus' ohne SYS/USR
+      return. " → Nicht eindeutig genug, nicht anfassen
+    endif.
+  endif.
+
+endmethod.
+
+
+  method determine_statuscode.
+
+    "----------------------------------------------------------------------------"
+    "- Map Atom wird pro Filterelement aufgerufen (3 Filter = 3 Aufrufe         -"
+    "- Quick check if statuscodes are already cached (Lazy loading)             -"
+    "-    Nein -> Status anhand Text ermitteln und in gt_cache schreiben        -"
+    "-    Ja   -> Nothing to do                                                 -"
+    "----------------------------------------------------------------------------"
+
+    me->check_cache_loaded(
+      iv_objecttype    = is_mapping-objecttype      "ORI, IFL, OVG usw.
+      iv_is_userstatus = is_mapping-is_userstatus   "User-/Systemstatus (andere Views für Texte TJ30T/TJ02T
+    ).
+
+    "---------------------------------------------------------------"
+    "-- Lookup: Status-Kurzname → interne Code(s) aus Cache        -"
+    "-- Hana DB hat Index auf StatusCode aber NICHT auf Statustext -"
+    "---------------------------------------------------------------"
+    rt_statuscodes = value #( for <ls_cache> in gt_cache where ( objecttype      = is_mapping-objecttype and
+                                                                 is_userstatus   = is_mapping-is_userstatus and
+                                                                 statusshortname = iv_statusname )
+                                                               ( statuscode      = <ls_cache>-statuscode
+                                                                 statusprofile   = <ls_cache>-statusprofile )
+                                                               ).
+
+    sort rt_statuscodes by statusprofile statuscode.
+    delete adjacent duplicates from rt_statuscodes comparing all fields.
+
+
+  endmethod.
+
+
+  method build_status_condition.
 
     "*------------------------------------------------------------------*
-    "* Baut OR-verknüpfte Condition aus Statuscode-Liste und wrappt
-    "* das Ergebnis in EXISTS(...) – analog CL_EAM_STS_EXIT.
+    "* Baut OR-verknüpfte Condition
     "*
     "* Lambda = Assoziationsname ohne führenden '_', uppercase:
     "*   '_systemstatus' → Lambda = 'SYSTEMSTATUS'
@@ -161,85 +280,39 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
     "*            WHERE SYSTEMSTATUS.Status = 'I0076' )
     "*------------------------------------------------------------------*
 
-    " Lambda = Assoz.-Name ohne '_', uppercase  (wie CL_EAM_STS_EXIT)
-    DATA(lv_lambda)         = to_upper( iv_assoc_path+1 ).
-    DATA(lv_status_field)   = lv_lambda && '.Status'.
-    DATA(lv_profile_field)  = lv_lambda && '.StatusProfile'.
+    " Lambda-Name: Prefix 'LBD' verhindert Kollision mit SADL-internem Scope-Alias.
+    " SADL leitet aus '_systemstatus' automatisch 'SYSTEMSTATUS' als Scope-Namen ab.
+    " Kollision → SADL benennt unser Lambda in 'SYSTEMSTATUS#1' um →
+    " element('SYSTEMSTATUS.Status') zeigt auf falschen Scope → Dump.
+    " Mit 'LBD'-Prefix: 'LBDSYSTEMSTATUS' / 'LBDUSERSTATUS' → keine Kollision.
+    data(lv_lambda)         = 'LBD' && to_upper( iv_assoc_path+1 ).
+    data(lv_status_field)   = lv_lambda && '.Status'.
+    data(lv_profile_field)  = lv_lambda && '.StatusProfile'.
 
-    LOOP AT it_statuscodes ASSIGNING FIELD-SYMBOL(<code>).
+    loop at it_statuscodes assigning field-symbol(<ls_code>).
 
-      DATA(lo_single) = COND #(
-        WHEN <code>-statusprofile IS NOT INITIAL
-        THEN io_cfac->element( lv_status_field )->equals( <code>-statuscode )->and( io_condition =
-                        io_cfac->element( lv_profile_field )->equals( <code>-statusprofile )
-                    )
-        ELSE io_cfac->element( lv_status_field )->equals( <code>-statuscode )
+      data(lo_single) = cond #( when <ls_code>-statusprofile is not initial
+                                  then io_cfac->element( lv_status_field )->equals( <ls_code>-statuscode )->and( io_condition =
+                                       io_cfac->element( lv_profile_field )->equals( <ls_code>-statusprofile ) )
+                                    else io_cfac->element( lv_status_field )->equals( <ls_code>-statuscode )
       ).
 
-      ro_condition = COND #(
-        WHEN ro_condition IS BOUND
-        THEN ro_condition->or( lo_single )
-        ELSE lo_single
+      ro_condition = cond #( when ro_condition is bound
+                              then ro_condition->or( lo_single )
+                                else lo_single
       ).
 
-    ENDLOOP.
+    endloop.
 
     " EXISTS-Wrapper: SADL setzt daraus die Subquery auf die Assoziation
     ro_condition = ro_condition->exists( iv_name = lv_lambda
                                          iv_path = iv_assoc_path ).
 
-  ENDMETHOD.
-
-
-  method check_cache_loaded.
-    "*------------------------------------------------------------------*
-    "* Lazy Loading: Status zum Objekttyp nur laden wenn noch nicht geschehen
-    "* SORTED TABLE mit UNIQUE KEY → READ TABLE ist O(log n)
-    "*------------------------------------------------------------------*
-
-    if not line_exists( gt_cache_loaded[ objecttype     = iv_objecttype
-                                         is_userstatus  = iv_is_userstatus ] ).
-
-      if iv_is_userstatus = abap_false.
-        me->load_sys_status_by_objtyp( iv_objecttype ).
-      else.
-        me->load_usr_status_by_objtyp( iv_objecttype ).
-      endif.
-
-      insert value #( objecttype    = iv_objecttype
-                      is_userstatus = iv_is_userstatus
-                     ) into table gt_cache_loaded.
-
-    endif.
 
   endmethod.
 
 
-  METHOD determine_statuscode.
-
-    "- Quick check if statuscodes are already cached (Lazy loading)
-    me->check_cache_loaded(
-      iv_objecttype    = is_mapping-objecttype
-      iv_is_userstatus = is_mapping-is_userstatus
-    ).
-
-    "-- Lookup: Status-Kurzname → interne Code(s) aus Cache --"
-    rt_statuscodes = VALUE #(
-      FOR <s> IN gt_cache
-      WHERE ( objecttype      = is_mapping-objecttype
-          AND is_userstatus   = is_mapping-is_userstatus
-          AND statusshortname = iv_statusname )
-      ( statuscode    = <s>-statuscode
-        statusprofile = <s>-statusprofile )
-    ).
-
-    SORT rt_statuscodes BY statusprofile statuscode.
-    DELETE ADJACENT DUPLICATES FROM rt_statuscodes COMPARING ALL FIELDS.
-
-  ENDMETHOD.
-
-
-  method IF_SADL_EXIT_FILTER_TRANSFORM~MAP_ATOM.
+  method if_sadl_exit_filter_transform~map_atom.
 *&=====================================================================*
 *&
 *& Beschreibung:
@@ -284,52 +357,27 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
 *& 2025-02-17     Nadine Hand     EAMR-43185_Expensive Statements
 *&=====================================================================*
 
-"*------------------------------------------------------------------*
-    "* SADL ruft map_atom für jeden Filter-Atom separat auf.
+    "*------------------------------------------------------------------*
+    "* SADL ruft map_atom für jedes Filter-Element(Atom) separat auf.
     "* Feldname verrät per Pattern alles was wir brauchen.
     "*------------------------------------------------------------------*
-    DATA: lv_operator_adjusted TYPE string,
-          lv_value_adjusted    TYPE string.
+    data: lv_operator_adjusted type string,
+          lv_value_adjusted    type string.
 
-    DATA(lo_cfac) = cl_sadl_cond_prov_factory_pub=>create_simple_cond_factory( ).
-
+    data(lo_cfac) = cl_sadl_cond_prov_factory_pub=>create_simple_cond_factory( ).
 
     "*------------------------------------------------------------------*
     "* Schritt 1: Feldname analysieren
-    "*   Primär: Pattern im Feldnamen (z.B. OrderSysStatus → ORDER + SYS)
-    "*   Fallback: Pattern im Entity-Namen, wenn Feldname generisch
-    "*             (z.B. System_Status → kein Objekttyp im Feldnamen
-    "*              → Entity /ETN/C_AC_ORDER_LIST enthält ORDER → ORI)
+    "*   Primär:   Objekttyp-Pattern im Feldnamen (z.B. OrderSysStatus)
+    "*   Fallback: Pattern im Entity-Namen (z.B. System_Status in
+    "*             /ETN/C_AC_ORDER_LIST → ORDER im Entity-Namen)
     "*------------------------------------------------------------------*
-    DATA(ls_mapping) = me->parse_field_name( to_upper( iv_element ) ).
+    data(ls_mapping) = me->parse_field_name(
+      iv_element = to_upper( iv_element )
+      iv_entity  = iv_entity ).
 
-    IF ls_mapping-is_valid = abap_false.
-      DATA(lv_entity_upper) = to_upper( iv_entity ).
-      DATA(lv_elem_upper)   = to_upper( iv_element ).
-
-      ls_mapping-objecttype = COND #(
-        WHEN lv_entity_upper CS 'ORDER'                                   THEN gc_objecttype-order
-        WHEN lv_entity_upper CS 'OPER'                                    THEN gc_objecttype-operation
-        WHEN lv_entity_upper CS 'CAPA' OR lv_entity_upper CS 'REQ'        THEN gc_objecttype-capacity
-        WHEN lv_entity_upper CS 'EQUI'                                    THEN gc_objecttype-equipment
-        WHEN lv_entity_upper CS 'IFLOC'
-          OR lv_entity_upper CS 'FUNCLOC'
-          OR lv_entity_upper CS 'FLOC'                                    THEN gc_objecttype-funcloc
-        WHEN lv_entity_upper CS 'NOTIF'                                   THEN gc_objecttype-notification
-      ).
-
-      IF ls_mapping-objecttype IS NOT INITIAL.
-        IF lv_elem_upper CS 'SYSTEM' OR lv_elem_upper CS 'SYS'.
-          ls_mapping-is_valid      = abap_true.
-          ls_mapping-is_userstatus = abap_false.
-        ELSEIF lv_elem_upper CS 'USER' OR lv_elem_upper CS 'USR'.
-          ls_mapping-is_valid      = abap_true.
-          ls_mapping-is_userstatus = abap_true.
-        ENDIF.
-      ENDIF.
-    ENDIF.
-
-    CHECK ls_mapping-is_valid = abap_true.
+    "Aus Feldname oder Entity-Name konnte Objekt und Statusart ermittelt werden
+    check ls_mapping-is_valid = abap_true.
 
     "*------------------------------------------------------------------*
     "* Schritt 2: Operator-Optimierung: *FREI* → FREI (EQUALS)
@@ -337,14 +385,15 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
     lv_operator_adjusted = iv_operator.
     lv_value_adjusted    = iv_value.
 
-    IF iv_operator = if_sadl_exit_filter_transform~co_operator-covers_pattern
-     AND strlen( iv_value ) = 6
-     AND iv_value(1)   = '*'
-     AND iv_value+5    = '*'
-     AND iv_value+1(4) NS '*'.
+    "Hana kann auf EQ besser lesen als auf *
+    if iv_operator = if_sadl_exit_filter_transform~co_operator-covers_pattern
+     and strlen( iv_value ) = 6
+     and iv_value(1)   = '*'
+     and iv_value+5    = '*'
+     and iv_value+1(4) ns '*'.
       lv_operator_adjusted = if_sadl_exit_filter_transform~co_operator-equals.
       lv_value_adjusted    = iv_value+1(4).
-    ENDIF.
+    endif.
 
     "*------------------------------------------------------------------*
     "* Schritt 3: Assoziationspfad + Lambda ableiten
@@ -352,64 +401,216 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
     "*   '_systemstatus' → 'SYSTEMSTATUS'
     "*   '_userstatus'   → 'USERSTATUS'
     "*------------------------------------------------------------------*
-    DATA(lv_assoc_path) = COND string(
-      WHEN ls_mapping-is_userstatus = abap_true THEN '_userstatus'
-      ELSE                                            '_systemstatus' ).
+    data(lv_assoc_path) = cond string( when ls_mapping-is_userstatus = abap_true
+                                           then '_userstatus'
+                                            else '_systemstatus' ).
 
-    DATA(lv_lambda) = to_upper( lv_assoc_path+1 ).
+    data(lv_lambda) = 'LBD' && to_upper( lv_assoc_path+1 ).  " Prefix vermeidet SADL-internen Scope-Konflikt
 
     "*------------------------------------------------------------------*
     "* Schritt 4: Operator-Handling
     "*------------------------------------------------------------------*
-    CASE lv_operator_adjusted.
+    case lv_operator_adjusted.
 
-      WHEN if_sadl_exit_filter_transform~co_operator-equals.
+      when if_sadl_exit_filter_transform~co_operator-equals.
 
         " ── Leerstring → EXISTS( Status IS NULL ) ─────────────────────
-        IF condense( val = iv_value ) = ''.
+        if condense( val = iv_value ) = ''.
           ro_condition = lo_cfac->element( lv_lambda && '.Status' )->is_null(
                          )->exists( iv_name = lv_lambda iv_path = lv_assoc_path ).
 
-        " ── Zu lang → kein gültiger Statuscode (max 4 Zeichen) ────────
-        ELSEIF strlen( lv_value_adjusted ) > 4.
+          " ── Zu lang → kein gültiger Statuscode (max 4 Zeichen) ────────
+        elseif strlen( lv_value_adjusted ) > 4.
           ro_condition = lo_cfac->false( ).
 
-        " ── Normaler Filter → Lookup → EXISTS( Status = 'I0076' ) ─────
-        ELSE.
+          " ── Normaler Filter → Lookup → EXISTS( Status = 'I0076' ) ─────
+        else.
 
-          DATA(lt_statuscodes) = me->determine_statuscode(
+          data(lt_statuscodes) = me->determine_statuscode(
             iv_statusname = lv_value_adjusted
             is_mapping    = ls_mapping
           ).
 
-          IF lt_statuscodes IS INITIAL.
+          "wenn keine Texte ermittelt werden konnten - raus
+          if lt_statuscodes is initial.
             ro_condition = lo_cfac->false( ).
-          ELSE.
+          else.
             ro_condition = me->build_status_condition(
               it_statuscodes = lt_statuscodes
               io_cfac        = lo_cfac
               iv_assoc_path  = lv_assoc_path
             ).
-          ENDIF.
+          endif.
 
-        ENDIF.
+        endif. "Ende Prüfung auf EQ
 
-      WHEN if_sadl_exit_filter_transform~co_operator-covers_pattern.
+        "- Wir haben keine Wildcards - oben schon optimiert - StatusCodeText auf DB ist langsam -"
+      when if_sadl_exit_filter_transform~co_operator-covers_pattern.
         " Echte Wildcards (FR*, *EI) → kein Lookup möglich
         ro_condition = lo_cfac->false( ).
 
-      WHEN if_sadl_exit_filter_transform~co_operator-is_null.
+      when if_sadl_exit_filter_transform~co_operator-is_null.
         " OData $filter=Field eq null → direkte Pfadreferenz, kein EXISTS
         " (analog CL_EAM_STS_EXIT: lv_element_w_path ohne ->exists())
         ro_condition = lo_cfac->element( lv_assoc_path && '.Status' )->is_null( ).
 
-      WHEN OTHERS.
+      when others.
         " LT, GT und unbekannte Operatoren ergeben bei Status keinen Sinn.
         " NE: SADL ruft map_atom mit EQ auf und erzeugt selbst NOT EXISTS.
         ro_condition = lo_cfac->false( ).
 
-    ENDCASE.
+    endcase.
+  endmethod.
 
+
+  method check_cache_loaded.
+    "*------------------------------------------------------------------*
+    "* Lazy Loading: Status zum Objekttyp nur laden wenn noch nicht geschehen
+    "* SORTED TABLE mit UNIQUE KEY → READ TABLE ist O(log n)
+    "*------------------------------------------------------------------*
+
+    if not line_exists( gt_cache_loaded[ objecttype     = iv_objecttype
+                                         is_userstatus  = iv_is_userstatus ] ).
+
+      if iv_is_userstatus = abap_false.
+        me->load_sys_status_by_objtyp( iv_objecttype ).
+      else.
+        me->load_usr_status_by_objtyp( iv_objecttype ).
+      endif.
+
+      insert value #( objecttype    = iv_objecttype
+                      is_userstatus = iv_is_userstatus
+                     ) into table gt_cache_loaded.
+
+    endif.
+
+  endmethod.
+
+
+  method if_sadl_exit_calc_element_read~calculate.
+    "*------------------------------------------------------------------*
+    "* Anzeige von System-/Anwenderstatus als concatenierter String.
+    "*
+    "* Prinzip (analog map_atom + Cache, aber für Instanz-Daten):
+    "*   1. Welche (Objekttyp × Status-Typ)-Kombos werden gebraucht?
+    "*      → parse_field_name() wiederverwenden
+    "*   2. Alle ObjectKeys aus it_original_data sammeln (eine Abfrage
+    "*      für die ganze Seite, kein N+1-Problem)
+    "*   3. Pro Kombo: EIN Bulk-SELECT mit STRING_AGG
+    "*      → HANA erledigt die Aggregation, kein ABAP-Loop nötig
+    "*   4. Ergebnis zeilenweise in ct_calculated_data schreiben
+    "*      → ASSIGN COMPONENT: generisch, unabhängig vom Entity-Typ
+    "*------------------------------------------------------------------*
+
+    "*--- Entity per RTTI ermitteln (Fallback für generische Feldnamen wie SYSTEM_STATUS) ---*
+    "* Wenn Feldname keinen Objekttyp enthält, liefert parse_field_name is_valid = false.
+    "* Mit dem Entity-Namen (z.B. /ETN/C_AC_ORDER_LIST) greift der Fallback in parse_field_name.
+    DATA lv_rtti_entity TYPE string.
+    TRY.
+      DATA(lo_tabd) = CAST cl_abap_tabledescr( cl_abap_typedescr=>describe_by_data( it_original_data ) ).
+      lv_rtti_entity = lo_tabd->get_table_line_type( )->get_relative_name( ).
+    CATCH cx_root. " RTTI nicht verfügbar → Feldname muss Objekttyp enthalten
+    ENDTRY.
+
+    "*--- Schritt 1: Benötigte (Objekttyp × Status-Typ)-Kombos ermitteln ---*
+    data lt_needed type sorted table of ty_cache_loaded
+      with unique key objecttype is_userstatus.
+
+    loop at it_requested_calc_elements assigning field-symbol(<elem_name>).
+      data(ls_mapping) = me->parse_field_name(
+        iv_element = to_upper( <elem_name> )
+        iv_entity  = lv_rtti_entity ).
+      check ls_mapping-is_valid = abap_true.
+      if not line_exists( lt_needed[ objecttype    = ls_mapping-objecttype
+                                     is_userstatus = ls_mapping-is_userstatus ] ).
+        insert value #( objecttype    = ls_mapping-objecttype
+                        is_userstatus = ls_mapping-is_userstatus ) into table lt_needed.
+      endif.
+    endloop.
+
+    check lt_needed is not initial.
+
+    "*--- Schritt 2: ObjectKeys aus it_original_data sammeln ---*
+    data lt_keys type rseloption.
+
+    loop at it_original_data assigning field-symbol(<ls_orig>).
+      assign component 'OBJECTKEY' of structure <ls_orig> to field-symbol(<lv_objkey>).
+      check sy-subrc = 0 and <lv_objkey> is not initial.
+      append value #( sign = 'I' option = 'EQ' low = <lv_objkey> ) to lt_keys.
+    endloop.
+
+    sort lt_keys by low.
+    delete adjacent duplicates from lt_keys comparing low.
+
+    check lt_keys is not initial.
+
+    "*--- Schritt 3: Bulk-SELECT STRING_AGG pro Kombo ---*
+    data lt_results type ty_status_result_tab.
+
+    loop at lt_needed assigning field-symbol(<ls_needed>).
+      data(lv_view) = me->resolve_cds_view(
+        iv_objecttype    = <ls_needed>-objecttype
+        iv_is_userstatus = <ls_needed>-is_userstatus ).
+      check lv_view is not initial.
+
+      types: begin of ts_concat,
+               objectkey     type j_objnr,
+               status_concat type string,
+             end of ts_concat,
+             tt_concat type table of ts_concat.
+
+      data: lt_sel type tt_concat.
+
+      select objectkey,
+             string_agg( status, ' ' order by status ) as status_concat
+        from (lv_view)
+        where objectkey in @lt_keys
+        group by objectkey
+        into table @lt_sel.
+
+
+      loop at lt_sel assigning field-symbol(<ls_sel>).
+         append value #( objecttype    = <ls_needed>-objecttype
+                         is_userstatus = <ls_needed>-is_userstatus
+                         objectkey     = <ls_sel>-objectkey
+                         status_concat = <ls_sel>-status_concat ) to lt_results.
+      endloop.
+    endloop.
+
+    "*--- Schritt 4: ct_calculated_data befüllen ---*
+    loop at it_original_data assigning <ls_orig>.
+      append initial line to ct_calculated_data assigning field-symbol(<ls_result>).
+      <ls_result> = <ls_orig>.  " alle Original-Felder kopieren
+
+      assign component 'OBJECTKEY' of structure <ls_result> to field-symbol(<key>).
+
+      loop at it_requested_calc_elements assigning <elem_name>.
+        data(ls_elem_map) = me->parse_field_name(
+          iv_element = to_upper( <elem_name> )
+          iv_entity  = lv_rtti_entity ).
+        check ls_elem_map-is_valid = abap_true.
+
+        data(lv_concat) = value #(
+          lt_results[ objecttype    = ls_elem_map-objecttype
+                      is_userstatus = ls_elem_map-is_userstatus
+                      objectkey     = <key> ]-status_concat
+          default '' ).
+
+        assign component <elem_name> of structure <ls_result> to field-symbol(<field>).
+        check sy-subrc = 0.
+        <field> = lv_concat.
+      endloop.
+    endloop.
+
+  endmethod.
+
+
+  method IF_SADL_EXIT_CALC_ELEMENT_READ~GET_CALCULATION_INFO.
+    "*------------------------------------------------------------------*
+    "* SADL muss OBJECTKEY immer in it_original_data mitliefern,
+    "* damit calculate den Bulk-SELECT aufbauen kann.
+    "*------------------------------------------------------------------*
+    APPEND 'OBJECTKEY' TO et_requested_orig_elements.
   endmethod.
 
 
@@ -499,190 +700,15 @@ CLASS /ETN/CL_PM_VDM_IH_STATUS IMPLEMENTATION.
   endmethod.
 
 
-method parse_field_name.
-  "*------------------------------------------------------------------*
-  "* Pattern-Erkennung - Position im Feldnamen egal!
-  "*
-  "* Drei Bedingungen (alle müssen erfüllt sein):
-  "*   1. Pflicht:    'STAT' enthalten
-  "*   2. Objekttyp: ORDER / EQUI / xFLOC / OPER / NOTIF / CAPA
-  "*   3. Typ:       SYS/SYSTEM = Systemstatus
-  "*                 USR/USER   = Anwenderstatus
-  "*
-  "* Reihenfolge bei Objekttyp:
-  "*   Spezifischere Pattern zuerst (IFLOC vor FLOC)-
-  "*   Bei Überschneidung: erster Match gewinnt
-  "*
-  "* Reihenfolge bei Status-Typ:
-  "*   SYSTEM vor SYS (SYSTEM enthält SYS als Substring!)
-  "*   USER   vor USR (analog)
-  "*------------------------------------------------------------------*
-
-
-  "----------------------------------------------------"
-  "- Großbuchstaben damit man besser vergleichen kann -"
-  "----------------------------------------------------"
-  data(lv_field) = to_upper( iv_element ).
-
-  "Ergebnis der Prüfung default-mäßig auf False
-  rs_mapping-is_valid = abap_false.
-
-  "*---------------------------------------------------------------------------------------------------*
-  "* Check: STAT muss enthalten sein - sonst False-Positive möglich (z.B. 'ORDERTYPE', 'EQUIPMENT')  --*
-  "*---------------------------------------------------------------------------------------------------*
-  check lv_field cs 'STAT'.
-
-  "*--------------------------------------------------------------------------------------------------*
-  "* Objekttyp aus View-Feldnamen erkennen und zuweisen. Spezifische zuerst IFLOC/FUNCLOC vor FLOC  --*
-  "*--------------------------------------------------------------------------------------------------*
-  rs_mapping-objecttype = cond #(  when lv_field cs 'ORDER'       then gc_objecttype-order        "ORI
-                                   when lv_field cs 'OPER'        then gc_objecttype-operation    "OVG
-                                   when lv_field cs 'CAPA'
-                                     or lv_field cs 'REQ'         then gc_objecttype-capacity     "O2C
-
-                                   when lv_field cs 'EQUI'        then gc_objecttype-equipment    "EQI
-                                   when lv_field cs 'IFLOC'
-                                     or lv_field cs 'FUNCTLOC'
-                                     or lv_field cs 'FUNCLOC'
-                                     or lv_field cs 'FLOC'        then gc_objecttype-funcloc      "IFL
-
-                                   when lv_field cs 'NOTIF'       then gc_objecttype-notification "QMI
-                                 ).
-
-  if rs_mapping-objecttype is not initial.
-
-    "*-----------------------------------------------------------------------*
-    "* Status-Typ aus View-Feldnamen erkennen - SYSTEM/SYS vs. USER/USR    --*
-    "*-----------------------------------------------------------------------*
-    if lv_field cs 'SYSTEM' or lv_field cs 'SYS'.
-      rs_mapping-is_valid      = abap_true.
-      rs_mapping-is_userstatus = abap_false.
-    elseif lv_field cs 'USER' or lv_field cs 'USR'.
-      rs_mapping-is_valid      = abap_true.
-      rs_mapping-is_userstatus = abap_true.
-    " else: kein SYS/USR erkannt → is_valid bleibt abap_false
-    "       → CHECK in map_atom schlägt an → Feld wird nicht angefasst
-    "       Beispiel: 'OrderStatus' ohne SYS/USR
-    endif.
-  endif.
-
-endmethod.
-
-
-  METHOD if_sadl_exit_calc_element_read~get_calculation_info.
-    "*------------------------------------------------------------------*
-    "* SADL muss OBJECTKEY immer in it_original_data mitliefern,
-    "* damit calculate den Bulk-SELECT aufbauen kann.
-    "*------------------------------------------------------------------*
-    APPEND 'OBJECTKEY' TO et_requested_orig_elements.
-  ENDMETHOD.
-
-
-  METHOD if_sadl_exit_calc_element_read~calculate.
-    "*------------------------------------------------------------------*
-    "* Anzeige von System-/Anwenderstatus als concatenierter String.
-    "*
-    "* Prinzip (analog map_atom + Cache, aber für Instanz-Daten):
-    "*   1. Welche (Objekttyp × Status-Typ)-Kombos werden gebraucht?
-    "*      → parse_field_name() wiederverwenden
-    "*   2. Alle ObjectKeys aus it_original_data sammeln (eine Abfrage
-    "*      für die ganze Seite, kein N+1-Problem)
-    "*   3. Pro Kombo: EIN Bulk-SELECT mit STRING_AGG
-    "*      → HANA erledigt die Aggregation, kein ABAP-Loop nötig
-    "*   4. Ergebnis zeilenweise in ct_calculated_data schreiben
-    "*      → ASSIGN COMPONENT: generisch, unabhängig vom Entity-Typ
-    "*------------------------------------------------------------------*
-
-    "*--- Schritt 1: Benötigte (Objekttyp × Status-Typ)-Kombos ermitteln ---*
-    DATA lt_needed TYPE SORTED TABLE OF ty_bucket_key
-      WITH UNIQUE KEY objecttype is_userstatus.
-
-    LOOP AT it_requested_calc_elements ASSIGNING FIELD-SYMBOL(<elem_name>).
-      DATA(ls_mapping) = me->parse_field_name( to_upper( <elem_name> ) ).
-      CHECK ls_mapping-is_valid = abap_true.
-      IF NOT line_exists( lt_needed[ objecttype    = ls_mapping-objecttype
-                                     is_userstatus = ls_mapping-is_userstatus ] ).
-        INSERT VALUE #( objecttype    = ls_mapping-objecttype
-                        is_userstatus = ls_mapping-is_userstatus ) INTO TABLE lt_needed.
-      ENDIF.
-    ENDLOOP.
-
-    CHECK lt_needed IS NOT INITIAL.
-
-    "*--- Schritt 2: ObjectKeys aus it_original_data sammeln ---*
-    DATA lt_keys TYPE rseloption.
-
-    LOOP AT it_original_data ASSIGNING FIELD-SYMBOL(<orig>).
-      ASSIGN COMPONENT 'OBJECTKEY' OF STRUCTURE <orig> TO FIELD-SYMBOL(<objkey>).
-      CHECK sy-subrc = 0 AND <objkey> IS NOT INITIAL.
-      APPEND VALUE #( sign = 'I' option = 'EQ' low = <objkey> ) TO lt_keys.
-    ENDLOOP.
-
-    SORT lt_keys BY low.
-    DELETE ADJACENT DUPLICATES FROM lt_keys COMPARING low.
-
-    CHECK lt_keys IS NOT INITIAL.
-
-    "*--- Schritt 3: Bulk-SELECT STRING_AGG pro Kombo ---*
-    DATA lt_results TYPE ty_status_result_tab.
-
-    LOOP AT lt_needed ASSIGNING FIELD-SYMBOL(<needed>).
-      DATA(lv_view) = me->resolve_cds_view(
-        iv_objecttype    = <needed>-objecttype
-        iv_is_userstatus = <needed>-is_userstatus ).
-      CHECK lv_view IS NOT INITIAL.
-
-      SELECT objectkey,
-             string_agg( status, ' ' ORDER BY status ) AS status_concat
-        FROM (<lv_view>)
-        WHERE objectkey IN @lt_keys
-        GROUP BY objectkey
-        INTO TABLE @DATA(lt_sel).
-
-      LOOP AT lt_sel ASSIGNING FIELD-SYMBOL(<sel>).
-        TRY.
-          INSERT VALUE #( objecttype    = <needed>-objecttype
-                          is_userstatus = <needed>-is_userstatus
-                          objectkey     = <sel>-objectkey
-                          status_concat = <sel>-status_concat ) INTO TABLE lt_results.
-        CATCH cx_sy_itab_duplicate_key.  " kann nicht auftreten, aber defensiv
-        ENDTRY.
-      ENDLOOP.
-    ENDLOOP.
-
-    "*--- Schritt 4: ct_calculated_data befüllen ---*
-    LOOP AT it_original_data ASSIGNING <orig>.
-      APPEND INITIAL LINE TO ct_calculated_data ASSIGNING FIELD-SYMBOL(<result>).
-      <result> = <orig>.  " alle Original-Felder kopieren
-
-      ASSIGN COMPONENT 'OBJECTKEY' OF STRUCTURE <result> TO FIELD-SYMBOL(<key>).
-
-      LOOP AT it_requested_calc_elements ASSIGNING <elem_name>.
-        DATA(ls_elem_map) = me->parse_field_name( to_upper( <elem_name> ) ).
-        CHECK ls_elem_map-is_valid = abap_true.
-
-        DATA(lv_concat) = VALUE #(
-          lt_results[ objecttype    = ls_elem_map-objecttype
-                      is_userstatus = ls_elem_map-is_userstatus
-                      objectkey     = <key> ]-status_concat
-          DEFAULT '' ).
-
-        ASSIGN COMPONENT <elem_name> OF STRUCTURE <result> TO FIELD-SYMBOL(<field>).
-        CHECK sy-subrc = 0.
-        <field> = lv_concat.
-      ENDLOOP.
-    ENDLOOP.
-
-  ENDMETHOD.
-
-
-  METHOD resolve_cds_view.
-    "*------------------------------------------------------------------*
+  method RESOLVE_CDS_VIEW.
+      "*------------------------------------------------------------------*
     "* Liefert den CDS-View-Namen für Bulk-SELECT in calculate.
     "* Jeder View filtert bereits auf den richtigen OBJNR-Prefix
     "* und den richtigen Status-Typ (I% = System, E% = Anwender).
     "*------------------------------------------------------------------*
     rv_view = COND #(
+      WHEN iv_objecttype = gc_objecttype-order        AND iv_is_userstatus = abap_false THEN '/ETN/I_ORDER_ACT_SYS_STAT'
+      WHEN iv_objecttype = gc_objecttype-order        AND iv_is_userstatus = abap_true  THEN '/ETN/I_ORDER_ACT_USR_STAT'
       WHEN iv_objecttype = gc_objecttype-equipment    AND iv_is_userstatus = abap_false THEN '/ETN/I_EQUI_ACT_SYS_STAT'
       WHEN iv_objecttype = gc_objecttype-equipment    AND iv_is_userstatus = abap_true  THEN '/ETN/I_EQUI_ACT_USR_STAT'
       WHEN iv_objecttype = gc_objecttype-funcloc      AND iv_is_userstatus = abap_false THEN '/ETN/I_FLOC_ACT_SYS_STAT'
@@ -692,7 +718,5 @@ endmethod.
       WHEN iv_objecttype = gc_objecttype-operation    AND iv_is_userstatus = abap_false THEN '/ETN/I_OPER_ACT_SYS_STAT'
       WHEN iv_objecttype = gc_objecttype-operation    AND iv_is_userstatus = abap_true  THEN '/ETN/I_OPER_ACT_USR_STAT'
     ).
-  ENDMETHOD.
-
-
+  endmethod.
 ENDCLASS.
