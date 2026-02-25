@@ -280,8 +280,12 @@ endmethod.
     "*            WHERE SYSTEMSTATUS.Status = 'I0076' )
     "*------------------------------------------------------------------*
 
-    " Lambda = Assoz.-Name ohne '_', uppercase  (wie CL_EAM_STS_EXIT)
-    data(lv_lambda)         = to_upper( iv_assoc_path+1 ).
+    " Lambda-Name: Prefix 'LBD' verhindert Kollision mit SADL-internem Scope-Alias.
+    " SADL leitet aus '_systemstatus' automatisch 'SYSTEMSTATUS' als Scope-Namen ab.
+    " Kollision → SADL benennt unser Lambda in 'SYSTEMSTATUS#1' um →
+    " element('SYSTEMSTATUS.Status') zeigt auf falschen Scope → Dump.
+    " Mit 'LBD'-Prefix: 'LBDSYSTEMSTATUS' / 'LBDUSERSTATUS' → keine Kollision.
+    data(lv_lambda)         = 'LBD' && to_upper( iv_assoc_path+1 ).
     data(lv_status_field)   = lv_lambda && '.Status'.
     data(lv_profile_field)  = lv_lambda && '.StatusProfile'.
 
@@ -401,7 +405,7 @@ endmethod.
                                            then '_userstatus'
                                             else '_systemstatus' ).
 
-    data(lv_lambda) = to_upper( lv_assoc_path+1 ).
+    data(lv_lambda) = 'LBD' && to_upper( lv_assoc_path+1 ).  " Prefix vermeidet SADL-internen Scope-Konflikt
 
     "*------------------------------------------------------------------*
     "* Schritt 4: Operator-Handling
