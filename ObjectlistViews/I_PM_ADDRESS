@@ -1,0 +1,24 @@
+define view entity /ETN/I_PM_ADDRESS as select from adrc  
+{
+   key addrnumber   as Addrnumber,
+       name1        as FirstName,
+       name2        as LastName,    
+       city1        as City,
+       city2        as District, 
+       post_code1   as PostCode,
+       street       as Street,
+       house_num1   as HouseNumber,
+       house_num2   as HouseNumber2,
+       country      as Country,
+       region       as Region,
+       mc_city1     as McCity1,
+       mc_street    as McStreet,
+       city2        as McDistrict,
+       tel_number   as TelNumber,
+       fax_number   as FaxNumber
+              
+       
+} where ( date_from <= $session.system_date and date_to >=$session.system_date )
+   and addr_group = 'PM01'    
+   and nation = ' ' 
+   and date_from =  '00010101'
