@@ -1,0 +1,12 @@
+define view entity /ETN/I_ILOA_NOTIF_TP 
+
+            as select from /ETN/I_ILOA_PM as iloa
+                          left outer to one join iflot as iflot 
+                                        on iloa.FunclocNo = iflot.tplnr
+{
+    key iloa.Iloan,
+        iloa.FunclocNo as IloaTplnr,
+        iflot.iloan as IloanTP,
+        iflot.tplnr
+            
+}
