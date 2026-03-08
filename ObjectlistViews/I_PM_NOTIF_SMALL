@@ -1,0 +1,30 @@
+define view entity /ETN/I_PM_NOTIF_SMALL 
+
+        as select from qmel
+                       inner join qmih
+                               on qmel.qmnum = qmih.qmnum
+
+association[0..1] to /ETN/I_ILOA_NOTIF_TP as _Iloa on _Iloa.Iloan = qmih.iloan                    
+                               
+{
+    qmel.qmnum              as NotifNo,
+    qmel.qmtxt              as NotifDesc,
+    qmel.qmart              as NotifType,
+    qmih.iloan              as Iloan,
+    qmih.equnr              as EquiNo,
+    qmih.iwerk              as PlanPlant,
+    qmel.objnr              as ObjectKey,
+    qmel.aufnr              as OrderId,
+    qmel.z_refaufnr         as RefOrderId,
+    qmel.z_sparte           as Sector, //Sparte,
+    qmel.z_spannungsebene   as Voltage, //Spannungsebene,
+    qmel.adrnr              as NotifAddressNo,
+    qmel.artpr              as PrioType,
+    qmel.priok              as Priority,
+//   _PriorityDesc.priokx                                                                  as PriorityDesc,
+    qmel.rbnr               as CatProfile,
+    qmel.qmnam                                                                            as ReportedByUser,
+  _Iloa  
+} 
+where qmel.phase <> '5' //Löschvormerkung
+  and qmel.qmart like 'D%'           //nur Meldungart D3 ist für Checkliste wichtig
