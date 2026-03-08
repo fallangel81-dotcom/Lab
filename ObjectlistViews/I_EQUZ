@@ -1,0 +1,13 @@
+define view entity /ETN/I_EQUZ 
+          as select from  equz
+{
+    
+  key equz.equnr,
+      ltrim(equz.equnr, '0')    as TechnicalObjectLabel, 
+      equz.iloan,               
+      equz.iwerk,                         //For access controll
+      equz.hequi                as ParentObject  
+        
+} where 
+   equz.datbi = '99991231'
+   and equz.eqlfn = '001'
