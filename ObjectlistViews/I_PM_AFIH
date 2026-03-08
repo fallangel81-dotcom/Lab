@@ -1,0 +1,20 @@
+define view entity /ETN/I_PM_AFIH 
+                as select from afih
+                            
+    
+  // AFIH - Basis für TechObj-Layer
+
+{
+ key afih.aufnr,            
+     afih.equnr,        
+     afih.iloan,        
+     afih.qmnum,        
+     cast( afih.obknr as objknr preserving type ) as obknr,           
+     afih.iphas,        
+     afih.ilart,        
+     afih.iwerk,
+     afih.ingpr,  //Planergruppe                
+     afih.gewrk  //WorkCenter        
+
+}
+  where afih.iphas = '2'  //nur freigegebene
