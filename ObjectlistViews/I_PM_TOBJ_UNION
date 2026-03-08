@@ -1,0 +1,37 @@
+define view entity /ETN/I_PM_TOBJ_UNION as 
+
+    select from /ETN/I_PM_FUNCTLOC as techobj
+{
+   key TechnicalObject,
+       TechnicalObjectLabel,
+       TechnicalObjectDescription,
+       TechnicalObjectType,
+       TechObjIsEquipOrFuncnlLoc,
+       iloan,
+       Equipment,
+       iwerk,       
+       TechnicalObjectId,
+       ParentObject,
+       ParentLabel,
+       ParentObjectIsEquiOrFuncloc,
+       TechObjCategory
+        
+} 
+
+union all 
+    select from /ETN/I_PM_EQUIPMNT as techobj
+{
+ key TechnicalObject,
+     TechnicalObjectLabel,
+     TechnicalObjectDescription,
+     TechnicalObjectType,
+     TechObjIsEquipOrFuncnlLoc,
+     iloan,
+     Equipment,
+     iwerk,
+     TechnicalObjectId,
+     ParentObject,
+     ParentLabel,
+     ParentObjectIsEquiOrFuncloc,
+     TechObjCategory  
+}
