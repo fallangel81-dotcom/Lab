@@ -1,0 +1,25 @@
+define view entity /ETN/I_TOBJ_GEODATA  
+
+      // Z-Tabelle von Team Assetdaten nimmt verschieden Geokoordinaten zu einem Technischen Objekt auf (Anfahrts-Koordinate, Drohnen-Koordinate usw.)
+       as select from /etn/pmt_geodata as geodata  
+
+
+    association [0..1] to /ETN/I_FIXED_VALUES_T as _GeoFormat   on  _GeoFormat.Domainname = '/ETN/PMD_GEO_FORMAT'
+                                                               and  _GeoFormat.DomainValue = geodata.geo_format
+                                                         
+    association [0..1] to /ETN/I_FIXED_VALUES_T as _GeoTyp      on  _GeoTyp.Domainname = '/ETN/PMD_GEO_TYP'
+                                                               and  _GeoTyp.DomainValue = geodata.geo_typ
+                                                               
+                                                                                                                                                                                               
+{
+    key key_geo_coordinates as KeyGeoCoordinates, //Tabelle Iloa - Feld zz_geo_coordinates
+    @ObjectModel.text.element: ['GeoTypDesc']
+    key geo_typ as GeoTyp,                          //welche Art von Koordinate es ist Anfahrts, Drohnen, tatsächlicher Standort 
+    @ObjectModel.text.element: ['GeoFormatDesc']           
+    key geo_format as GeoFormat,
+    _GeoTyp.DomainValueDesc as GeoTypDesc,
+    _GeoFormat.DomainValueDesc as GeoFormatDesc,
+    x_coordinate as XCoordinate,
+    y_coordinate as YCoordinate    
+
+} 
