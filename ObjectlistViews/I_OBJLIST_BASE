@@ -1,0 +1,46 @@
+define view entity /ETN/I_OBJLIST_BASE 
+    
+            as select from /ETN/I_OBJLIST_CORE as base  
+        
+                          inner join /ETN/C_ILOA_TECHOBJ as TechObj
+                                  on TechObj.Iloan     = base.Iloan
+                                 and TechObj.PlanPlant = base.PlanPlant                                    
+    
+{
+key base.OrderId                                as OrderId,
+key base.Counter                                as Counter,
+    base.ObjectListKey                          as ObjectListKey,
+    base.Iloan                                  as Iloan,                 
+    base.NotifNo                                as NotifNo,
+    base.EquiNo                                 as EquiNo,
+    base.PlanPlant                              as PlanPlant,
+    
+    TechObj.ABCIndicator                        as ABCIndicator,
+    TechObj.GeoCoordinateId                     as KeyGeoCoordinates,   
+    TechObj.TechObjAddressNo                    as TechObjAddressNo,
+    
+       
+    TechObj.TechnicalObject                     as TechObjectKey,           // ?0123
+    TechObj.TechnicalObjectLabel                as TechObjectNo,            // //1000000010-VG-MS , olist.TechnicalObjectLabel       as TechObjectNo,    ,    
+    TechObj.TechnicalObjectDescription          as TechObjectDesc,          // olist.TechnicalObjectDescription as TechObjectDesc,
+    TechObj.TechnicalObjectType                 as TechObjectType,
+    cast( TechObj.TechnicalObjectId 
+           as abap.char(30) )                   as TechObjectInternalKey,   //IF   - Measpoint
+   
+    TechObj.TechObjIsEquipOrFuncnlLoc           as TechObjIsEquipOrFuncnlLoc,
+       
+    case 
+     when base.EquiNo is not initial and TechObj.ParentObjectIsEquiOrFuncloc = 'EAMS_EQUI'   //Equi unter Equi
+       then TechObj.ParentObject
+     when base.EquiNo is not initial and TechObj.ParentObjectIsEquiOrFuncloc = 'EAMS_FL'   
+       then TechObj.FunclocNo
+     when base.EquiNo is initial and TechObj.ParentObject is not initial  
+       then TechObj.ParentObject else '' end                                                                as ParentTechObjectKey,  //?10000
+                     
+    case when base.EquiNo is not initial and TechObj.ParentObjectIsEquiOrFuncloc = 'EAMS_EQUI'
+          then TechObj.ParentObjectIsEquiOrFuncloc
+        when base.EquiNo is not initial and TechObj.ParentObjectIsEquiOrFuncloc = 'EAMS_FL'  
+          then cast( 'PARENT_FUNCLOC'   as  eams_tec_obj_type_value )
+          when base.EquiNo is initial and TechObj.ParentObject is not initial  
+           then cast( 'PARENT_FUNCLOC'   as  eams_tec_obj_type_value ) else ''         end                  as ParentObjectIsEquiOrFuncloc
+  }  
