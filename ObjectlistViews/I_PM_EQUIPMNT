@@ -1,0 +1,37 @@
+//Select Equipment Data for Technical Objects
+define view entity /ETN/I_PM_EQUIPMNT 
+
+            as select from /ETN/I_EQUZ as equz    
+                
+                    inner join  equi as _Equipmnt     
+                                 on  _Equipmnt.equnr = equz.equnr
+                     
+                             
+  association [0..1] to eqkt           as _EquipmntText on  $projection.TechnicalObject = _EquipmntText.equnr
+                                                        and _EquipmntText.spras = $session.system_language                                                    
+
+ {
+  key equz.equnr                                        as TechnicalObject,  
+      ltrim(equz.equnr, '0')                            as TechnicalObjectLabel, 
+      _EquipmntText.eqktx                               as TechnicalObjectDescription,
+      _Equipmnt.eqart                                   as TechnicalObjectType,        
+      _Equipmnt.eqtyp                                   as TechObjCategory,     
+      equz.iloan                                        as iloan,        
+      equz.iwerk                                        as iwerk,        //For access controll
+      equz.equnr                                        as Equipment,   
+      _Equipmnt.objnr                                   as TechnicalObjectId,
+      
+      cast( 'EAMS_EQUI' as  eams_tec_obj_type_value )   as TechObjIsEquipOrFuncnlLoc,
+            
+      cast( cast( equz.equnr as abap.char(40) ) 
+                as eams_tec_obj preserving type )       as TechnicalObjectEAMS,
+      
+      equz.ParentObject                                 as ParentObject,  
+      cast( equz.ParentObject as abap.char(30) )        as ParentLabel,
+      
+      cast( case when equz.ParentObject is not initial 
+        then 'EAMS_EQUI' else 'EAMS_FL' end 
+            as  eams_tec_obj_type_value )               as ParentObjectIsEquiOrFuncloc
+              
+
+} where equz.equnr like '0%'   //Spiegelobjekte fangen mit "S" an - werden nicht benötigt und sind ca. 7 Mio Einträge
