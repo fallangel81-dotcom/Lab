@@ -1,0 +1,15 @@
+@EndUserText.label : 'Geo Coordinates for technical objects'
+@AbapCatalog.enhancement.category : #NOT_EXTENSIBLE
+@AbapCatalog.tableCategory : #TRANSPARENT
+@AbapCatalog.deliveryClass : #A
+@AbapCatalog.dataMaintenance : #ALLOWED
+define table /etn/pmt_geodata {
+
+  key mandt               : mandt not null;
+  key key_geo_coordinates : /eon/pmd_geo_koordinaten not null;
+  key geo_typ             : /etn/pmd_geo_typ not null;
+  key geo_format          : /etn/pmd_geo_format not null;
+  x_coordinate            : /etn/pmd_geo_x_coordinate;
+  y_coordinate            : /etn/pmd_geo_y_coordinate;
+
+}
