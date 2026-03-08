@@ -1,0 +1,14 @@
+define view entity /ETN/I_ILOA_PM 
+            as select from iloa
+                           
+{
+key iloan              as Iloan,        
+    abckz              as ABCIndicator,
+    zz_geo_coordinates as GeoCoordinateId ,       //Wichtig für Association to_Geo
+    adrnr              as TechObjAddressNo,       //Wichtig für Adressermittlung 
+    swerk              as werks,
+    owner              as Owner,
+    tplnr              as FunclocNo
+   
+               
+} where tplnr is not initial 
