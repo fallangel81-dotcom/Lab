@@ -1,0 +1,48 @@
+define view entity /ETN/I_OBJLIST_CORE 
+  
+            as select from /ETN/I_PM_AFIH    as afih  //nur freigegebene Aufträge mit Auftragsart like ZD% 
+                           
+                           inner join objk   as olist      
+                                   on afih.obknr = olist.obknr // Objectlist   
+  
+ //Association wird verwendet um in diesem View die Unterscheidung/Harmonisierung von TechObj Objectlist/Notification hinzubekommen (Technische Objekt gehört der Meldung, nicht der Objektliste) 
+   association[0..1] to   /ETN/I_PM_NOTIF_SMALL as _NotifBase on _NotifBase.NotifNo     = olist.ihnum
+                                                             and _NotifBase.PlanPlant   = afih.iwerk 
+
+{
+  key afih.aufnr                                    as OrderId,
+  key olist.obzae                                   as Counter,
+      olist.obknr                                   as ObjectListKey,       
+     
+  case       
+      when olist.iloan is not initial
+        then olist.iloan                                        //olist.iloan ist entweder TP oder TP des Equis
+      when olist.ihnum is not initial                               // wenn NotifNo, gehört das technische Objekt der Meldung und nicht mehr der Objectlist 
+       then _NotifBase._Iloa.IloanTP else '' end      as Iloan,     // Iloa = Standort zum Kontierungobjekt - ILOA.ILOAN ILOA.TPLNR
+      
+      case 
+        when olist.equnr is not initial
+          then olist.equnr        
+        when olist.ihnum is not initial                         //nur Association aufreißen wenn Meldung in Objektliste vorhanden ist       
+         then _NotifBase.EquiNo else '' end          as EquiNo,
+     
+      olist.ihnum                                  as NotifNo,     
+      afih.iwerk                                   as PlanPlant,
+      
+      case
+       when olist.ihnum is not initial
+        and _NotifBase.Iloan is not initial
+         then _NotifBase._Iloa.tplnr
+            end                                    as NotifFuncloc,      
+      
+      case 
+        when olist.equnr is not initial
+          then olist.equnr else '' end             as OlistEqui,         
+      
+      case 
+        when olist.ihnum is not initial
+         then _NotifBase.EquiNo else '' end        as NotifEqui,        
+     
+     _NotifBase    
+     
+}
