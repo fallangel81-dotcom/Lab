@@ -1,0 +1,40 @@
+define view entity /ETN/I_ORD_OPER_CAPACITY_USR as select from
+                
+                    pa0105 as p5                            //im Usrtyp 0001 steht der SAP-Anmeldename
+                           inner join  kbed as kb           //KBED enthält die Einsätze des Monteurs
+                                   on kb.pernr = p5.pernr                    
+                                  and ( p5.begda <= $session.system_date and p5.endda >= $session.system_date )
+                                  and ( p5.usrty = '0001' and p5.usrid = $session.user ) // UserId Kommunitkation 0105 SystemID (Username) in Transaktion PA30
+                     
+                    inner join afko as ohead
+                            on kb.aufpl = ohead.aufpl      
+                        //    on kb.kapid = ohead.kapid  //wäre auch möglich
+                            
+//View macht ein Select auf die JEST und liest alle Vorgänge mit Löschvormerkung (umgedrehte Logik da kein "Exist" möglich ist)
+// define view entity /ETN/I_OPER_NO_DEL_HELPER as select from jest
+//  {  key objnr as ObjectKey   }   where inact is initial  and ( stat = 'I0013' or stat = 'I0076' ) group by objnr    
+
+association [0..1] to /ETN/I_OPER_NO_DEL_HELPER as _noDelStatus on  _noDelStatus.ObjectKey = kb.obsta                                                                                                          
+
+
+{    
+    key kb.bedid,
+    key kb.bedzl,
+    key kb.canum,
+        kb.split,    //Anzahl der Einsätze - offenes Problem ( pro Auftrag sind mehrere Einsätze pro Monteur denkbar - Unique fehlt )
+        kb.pernr     as Pernr,      
+        ohead.aufnr  as OrderId,
+        kb.vornr     as Activity,   
+        p5.usrid     as Kid,
+        kb.fstad,    //Frühestes Startdatum  (UI filtert beim Lesen auf timestamp StartDateTime) Doppelte Aufträge wenn Monteur mehr als 1 Einsatz pro Auftrag hat
+        kb.fstau,    //Frühestes Enddatum 
+        kb.aufpl     as OperationRoutingNo,
+ 
+        //Zeitlogik max(kb.fstad) min(kb.fstau) - schwierig zu sagen. 
+        
+
+                                                                    
+  }       
+    where kb.pernr is not initial
+     and  ( p5.begda <= $session.system_date and p5.endda >= $session.system_date )
+     and _noDelStatus.ObjectKey is null   //wenn hier etwas zurück kommt, ist es ein gelöschter Vorgang -> daher umgekehrte Logik
