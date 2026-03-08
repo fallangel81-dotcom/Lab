@@ -4,7 +4,22 @@ define view entity /ETN/I_OBJLIST_BASE
         
                           inner join /ETN/C_ILOA_TECHOBJ as TechObj
                                   on TechObj.Iloan     = base.Iloan
-                                 and TechObj.PlanPlant = base.PlanPlant                                    
+                                 and TechObj.PlanPlant = base.PlanPlant         
+/*         
+    //Adresseverknüpfung - View auf ADRC mit Schlüssel Addrnumber
+                          left outer join /ETN/I_PM_ADDRESS as addr 
+                                       on addr.Addrnumber = TechObj.TechObjAddressNo                                                                      
+
+    //Geodaten
+    association [0..*] to /ETN/I_TOBJ_GEODATA as _Geo on _Geo.KeyGeoCoordinates = $projection.KeyGeoCoordinates
+
+    //Messpunkte zum Technischen Objekt
+    association [0..*] to /ETN/PM_I_MEASPOINT as _MeasPoint      on _MeasPoint.PointTechObj = $projection.TechObjectInternalKey 
+
+Adresse und Associations könnten nachgelagert hinzugelesen werden wenn Objektliste steht -> View-Felder für UI in ObjectListCSV
+
+*/
+    
     
 {
 key base.OrderId                                as OrderId,
