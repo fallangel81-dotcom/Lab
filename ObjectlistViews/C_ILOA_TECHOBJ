@@ -1,0 +1,35 @@
+define view entity /ETN/C_ILOA_TECHOBJ 
+                        
+                        as select from /ETN/I_ILOA_PM as iloa                                                         
+    
+                       
+                        // 2. DANN UNION mit Compound Filter
+                         inner join /ETN/I_PM_TOBJ_UNION as tpequnion
+                                 on tpequnion.iloan = iloa.Iloan
+                                             
+                        inner join t001w as Plant
+                                on Plant.werks = iloa.werks     
+                               and tpequnion.iwerk = Plant.iwerk  // ← 2-dimensionaler Filter!
+                           
+                                                    
+{
+    key iloa.Iloan,
+        iloa.FunclocNo                          as FunclocNo,     //iloan aus equz = iloa.tplnr
+        iloa.GeoCoordinateId                    as GeoCoordinateId,
+        iloa.TechObjAddressNo                   as TechObjAddressNo,
+        iloa.ABCIndicator                       as ABCIndicator,        
+        tpequnion.TechnicalObject               as TechnicalObject,
+        tpequnion.TechnicalObjectDescription    as TechnicalObjectDescription,
+        tpequnion.TechnicalObjectId             as TechnicalObjectId,
+        tpequnion.TechnicalObjectLabel          as TechnicalObjectLabel,        
+        tpequnion.TechObjIsEquipOrFuncnlLoc     as TechObjIsEquipOrFuncnlLoc,
+        tpequnion.TechnicalObjectType           as TechnicalObjectType,
+        tpequnion.ParentLabel                   as ParentLabel,        
+        tpequnion.ParentObject                  as ParentObject,
+        tpequnion.ParentObjectIsEquiOrFuncloc   as ParentObjectIsEquiOrFuncloc,
+        tpequnion.iwerk                         as PlanPlant,
+        tpequnion.TechObjCategory               as TechObjCategory
+        
+        
+        
+}
