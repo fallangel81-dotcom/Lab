@@ -1,0 +1,36 @@
+//Select Functional Location Data for Technical Objects
+define view entity /ETN/I_PM_FUNCTLOC
+  
+                        as select from iflot
+    
+    
+    association [0..1] to iflotx                as _FunctLocText on _FunctLocText.tplnr = $projection.tplnr 
+                                                                and _FunctLocText.spras = $session.system_language
+    
+    association[0..1] to /ETN/I_PM_STRNO        as _Label       on _Label.Funcloc = iflot.tplnr   
+
+    association[0..1] to /ETN/I_PM_STRNO        as _ParentLabel  on iflot.tplma <> ''
+                                                                and _ParentLabel.Funcloc = iflot.tplma                                                                    
+                                            
+{
+  key cast( tplnr as eams_tech_obj_alpha_conv )     as TechnicalObject,
+      _Label.FunclocLabel                           as TechnicalObjectLabel,
+      iwerk,                                                                    //PlanningPlant for AccessControl
+      _FunctLocText.pltxt                           as TechnicalObjectDescription,
+      eqart                                         as TechnicalObjectType,
+      fltyp                                         as TechObjCategory,      
+      objnr                                         as TechnicalObjectId,
+      tplnr                                         as Tplnr,      
+      cast( 'EAMS_FL' as eams_tec_obj_type_value )  as TechObjIsEquipOrFuncnlLoc,              
+      tplma                                         as ParentObject,            
+      case when tplma is not initial then 
+          _ParentLabel.FunclocLabel else '' end     as ParentLabel,          
+      cast( case when tplma is not initial 
+       then 'EAMS_FL' else '' end as  
+         eams_tec_obj_type_value )                  as ParentObjectIsEquiOrFuncloc,
+        
+      iloan,   //nur vorübergehend benötigt bis SMEX Schnittstelle angepasst hat 
+     cast( '                  ' as equnr preserving type  ) as Equipment   
+      
+     
+}
