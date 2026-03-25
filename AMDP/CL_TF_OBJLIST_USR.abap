@@ -470,7 +470,7 @@ CLASS /etn/cl_tf_objlist_usr IMPLEMENTATION.
 
     END WHILE;
 
-    result = SELECT * FROM :lt_work;
+    RETURN SELECT * FROM :lt_work;
 
   ENDMETHOD.
 
