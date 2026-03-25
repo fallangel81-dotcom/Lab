@@ -68,10 +68,13 @@ CLASS /etn/cl_tf_objlist_usr IMPLEMENTATION.
     -- Session context: replaces $session.* variables from CDS
     -- CLIENT must be explicit on every table – HANA has no auto-client filter
     -- -----------------------------------------------------------------------
-    DECLARE lv_clnt NVARCHAR(3);
-    DECLARE lv_unam NVARCHAR(12);
-    DECLARE lv_date NVARCHAR(8);
-    DECLARE lv_lang NVARCHAR(1);
+    -- all DECLARE statements must appear before any other statement in SQLScript
+    DECLARE lv_clnt  NVARCHAR(3);
+    DECLARE lv_unam  NVARCHAR(12);
+    DECLARE lv_date  NVARCHAR(8);
+    DECLARE lv_lang  NVARCHAR(1);
+    DECLARE lv_iter  INTEGER := 0;
+    DECLARE lv_added INTEGER := 1;
 
     lv_clnt := session_context('CLIENT');
     lv_unam := session_context('APPLICATIONUSER');
@@ -369,8 +372,8 @@ CLASS /etn/cl_tf_objlist_usr IMPLEMENTATION.
     --     • objectlistkey = '' (not from OBJK)
     --     • counter       = max(existing counter for that order) + row offset
     -- -----------------------------------------------------------------------
-    DECLARE lv_iter  INTEGER := 0;
-    DECLARE lv_added INTEGER := 1;   -- seed > 0 to enter the loop
+    lv_iter  := 0;
+    lv_added := 1;   -- seed > 0 to enter the loop
 
     lt_work = SELECT * FROM :lt_deduped;
 
