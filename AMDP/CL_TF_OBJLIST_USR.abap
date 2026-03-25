@@ -322,22 +322,16 @@ CLASS /etn/cl_tf_objlist_usr IMPLEMENTATION.
         it.technical_object_type                     AS techobjecttype,
         CAST(it.technical_object_id AS NVARCHAR(30)) AS techobjectinternalkey,
         it.tech_obj_is_equip_or_funcloc              AS techobjiseequiporfuncnlloc,
-        -- Equi under Equi → parent equi key; all other cases → FL
+        -- Equipment: parent is ALWAYS the FL it is installed on (ILOA.tplnr),
+        --   regardless of whether the equipment also has a parent equipment.
+        -- FL: parent is the next FL up the hierarchy (IFLOT.tplma).
         CASE
-          WHEN h.equino != '' AND it.parent_obj_is_equi_or_funcloc = 'EAMS_EQUI'
-            THEN it.parent_object
-          WHEN h.equino != '' AND it.parent_obj_is_equi_or_funcloc = 'EAMS_FL'
-            THEN it.funcloc_no                       -- ILOA.tplnr = installed-in FL
-          WHEN h.equino  = '' AND it.parent_object != ''
-            THEN it.parent_object
+          WHEN h.equino != ''           THEN it.funcloc_no   -- TP des Equis
+          WHEN it.parent_object != ''   THEN it.parent_object -- übergeordneter TP
           ELSE ''
         END                                          AS parenttechobjectkey,
         CASE
-          WHEN h.equino != '' AND it.parent_obj_is_equi_or_funcloc = 'EAMS_EQUI'
-            THEN 'EAMS_EQUI'
-          WHEN h.equino != ''
-            THEN 'PARENT_FUNCLOC'
-          WHEN h.equino  = '' AND it.parent_object != ''
+          WHEN h.equino != '' OR it.parent_object != ''
             THEN 'PARENT_FUNCLOC'
           ELSE ''
         END                                          AS parentobjectiseequiorfuncloc
@@ -391,7 +385,8 @@ CLASS /etn/cl_tf_objlist_usr IMPLEMENTATION.
           r.planplant
         FROM :lt_work AS r
         WHERE r.parenttechobjectkey != ''
-          AND r.techobjiseequiporfuncnlloc = 'EAMS_FL'   -- only FL parents needed
+          -- check both FL and Equipment rows: Equipment parent is now always a FL,
+          -- so its missing FL must also be added and traversed upward
           AND NOT EXISTS (
             SELECT 1 FROM :lt_work AS rr
             WHERE  rr.orderid      = r.orderid
