@@ -24,7 +24,7 @@ CLASS /etn/cl_tf_objlist_usr DEFINITION
         techobjectdesc               TYPE c LENGTH 40,
         techobjecttype               TYPE eqart,
         techobjectinternalkey        TYPE c LENGTH 30,
-        techobjiseequiporfuncnlloc   TYPE eams_tec_obj_type_value,
+        techobjisequiporfuncnlloc   TYPE eams_tec_obj_type_value,
         parenttechobjectkey          TYPE c LENGTH 30,
         parentobjectiseequiorfuncloc TYPE eams_tec_obj_type_value,
       END OF ty_result.
@@ -324,7 +324,7 @@ CLASS /etn/cl_tf_objlist_usr IMPLEMENTATION.
         it.technical_object_desc                     AS techobjectdesc,
         it.technical_object_type                     AS techobjecttype,
         CAST(it.technical_object_id AS NVARCHAR(30)) AS techobjectinternalkey,
-        it.tech_obj_is_equip_or_funcloc              AS techobjiseequiporfuncnlloc,
+        it.tech_obj_is_equip_or_funcloc              AS techobjisequiporfuncnlloc,
         -- Equipment: parent is ALWAYS the FL it is installed on (ILOA.tplnr),
         --   regardless of whether the equipment also has a parent equipment.
         -- FL: parent is the next FL up the hierarchy (IFLOT.tplma).
@@ -352,7 +352,7 @@ CLASS /etn/cl_tf_objlist_usr IMPLEMENTATION.
         orderid, counter, objectlistkey, iloan, notifno, equino, planplant,
         abcindicator, keygeocoordinates, techobjaddressno,
         techobjectkey, techobjectno, techobjectdesc, techobjecttype,
-        techobjectinternalkey, techobjiseequiporfuncnlloc,
+        techobjectinternalkey, techobjisequiporfuncnlloc,
         parenttechobjectkey, parentobjectiseequiorfuncloc
       FROM (
         SELECT *,
@@ -453,7 +453,7 @@ CLASS /etn/cl_tf_objlist_usr IMPLEMENTATION.
           pd.fl_desc                                 AS techobjectdesc,
           pd.eqart                                   AS techobjecttype,
           CAST(pd.objnr AS NVARCHAR(30))             AS techobjectinternalkey,
-          'EAMS_FL'                                  AS techobjiseequiporfuncnlloc,
+          'EAMS_FL'                                  AS techobjisequiporfuncnlloc,
           pd.tplma                                   AS parenttechobjectkey,
           CASE WHEN pd.tplma != ''
                THEN 'PARENT_FUNCLOC' ELSE ''
