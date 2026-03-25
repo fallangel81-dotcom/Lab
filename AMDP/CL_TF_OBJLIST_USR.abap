@@ -284,7 +284,9 @@ CLASS /etn/cl_tf_objlist_usr IMPLEMENTATION.
         tobj.parent_obj_is_equi_or_funcloc,
         tobj.iloan,
         tobj.iwerk,
-        tobj.funcloc_no,
+        il.tplnr               AS funcloc_no,   -- always ILOA.tplnr:
+        --   for FL:    same as fl.tplnr (own FL)
+        --   for Equi:  the FL the equipment is installed in → fixes empty parent
         il.abckz               AS abc_indicator,
         il.zz_geo_coordinates  AS key_geo_coordinates,
         il.adrnr               AS tech_obj_address_no
@@ -299,11 +301,11 @@ CLASS /etn/cl_tf_objlist_usr IMPLEMENTATION.
              AND t1w.iwerk = tobj.iwerk;
 
     -- -----------------------------------------------------------------------
-    -- Step 7: Final result – parent key logic from I_OBJLIST_BASE
-    --   ParentObjectIsEquiOrFuncloc is intentionally simplified:
-    --   Equipment always resolves to PARENT_FUNCLOC (equi hangs under FL).
+    -- Step 7: Join + parent key logic  (= I_OBJLIST_BASE inline)
+    --   ParentObjectIsEquiOrFuncloc simplified: Equi always → PARENT_FUNCLOC
+    --   because even Equi-under-Equi is ultimately assigned to a FL.
     -- -----------------------------------------------------------------------
-    result = SELECT
+    lt_base_result = SELECT
         h.orderid,
         h.counter,
         h.objectlistkey,
@@ -320,12 +322,12 @@ CLASS /etn/cl_tf_objlist_usr IMPLEMENTATION.
         it.technical_object_type                     AS techobjecttype,
         CAST(it.technical_object_id AS NVARCHAR(30)) AS techobjectinternalkey,
         it.tech_obj_is_equip_or_funcloc              AS techobjiseequiporfuncnlloc,
-        -- Parent key: Equi-under-Equi → parent equi; otherwise → funcl. loc.
+        -- Equi under Equi → parent equi key; all other cases → FL
         CASE
           WHEN h.equino != '' AND it.parent_obj_is_equi_or_funcloc = 'EAMS_EQUI'
             THEN it.parent_object
           WHEN h.equino != '' AND it.parent_obj_is_equi_or_funcloc = 'EAMS_FL'
-            THEN it.funcloc_no
+            THEN it.funcloc_no                       -- ILOA.tplnr = installed-in FL
           WHEN h.equino  = '' AND it.parent_object != ''
             THEN it.parent_object
           ELSE ''
@@ -343,6 +345,134 @@ CLASS /etn/cl_tf_objlist_usr IMPLEMENTATION.
       INNER JOIN :lt_iloa_tobj AS it
              ON  it.iloan = h.iloan
              AND it.iwerk = h.planplant;
+
+    -- -----------------------------------------------------------------------
+    -- Step 7b: Deduplicate – same TechObject can come from multiple OBJK
+    --   entries (e.g. several operations referencing the same FL/equipment).
+    --   Keep the row with the lowest counter per (orderid, techobjectkey).
+    -- -----------------------------------------------------------------------
+    lt_deduped = SELECT
+        orderid, counter, objectlistkey, iloan, notifno, equino, planplant,
+        abcindicator, keygeocoordinates, techobjaddressno,
+        techobjectkey, techobjectno, techobjectdesc, techobjecttype,
+        techobjectinternalkey, techobjiseequiporfuncnlloc,
+        parenttechobjectkey, parentobjectiseequiorfuncloc
+      FROM (
+        SELECT *,
+               ROW_NUMBER() OVER ( PARTITION BY orderid, techobjectkey
+                                   ORDER BY counter ) AS rn
+          FROM :lt_base_result
+      )
+      WHERE rn = 1;
+
+    -- -----------------------------------------------------------------------
+    -- Step 8: Add missing parent FLs (iterative hierarchy expansion)
+    --   Every TechObject whose parenttechobjectkey is not yet represented
+    --   as its own row gets a synthetic entry added.
+    --   The loop runs until no more missing parents are found or after 15
+    --   iterations (covers any realistic FL hierarchy depth).
+    --   Synthetic rows carry:
+    --     • objectlistkey = '' (not from OBJK)
+    --     • counter       = max(existing counter for that order) + row offset
+    -- -----------------------------------------------------------------------
+    DECLARE lv_iter  INTEGER := 0;
+    DECLARE lv_added INTEGER := 1;   -- seed > 0 to enter the loop
+
+    lt_work = SELECT * FROM :lt_deduped;
+
+    WHILE :lv_iter < 15 AND :lv_added > 0 DO
+
+      lv_iter := :lv_iter + 1;
+
+      -- Parents referenced but not yet in the working set
+      lt_missing = SELECT DISTINCT
+          r.parenttechobjectkey AS tplnr,
+          r.orderid,
+          r.planplant
+        FROM :lt_work AS r
+        WHERE r.parenttechobjectkey != ''
+          AND r.techobjiseequiporfuncnlloc = 'EAMS_FL'   -- only FL parents needed
+          AND NOT EXISTS (
+            SELECT 1 FROM :lt_work AS rr
+            WHERE  rr.orderid      = r.orderid
+              AND  rr.techobjectkey = r.parenttechobjectkey
+          );
+
+      lv_added := RECORD_COUNT(:lt_missing);
+      IF :lv_added = 0 THEN BREAK; END IF;
+
+      -- Look up FL master data for the missing parents
+      lt_parent_data = SELECT
+          mp.orderid,
+          mp.planplant,
+          fl.tplnr,
+          COALESCE(fl.tplma, '')                     AS tplma,
+          fl.objnr,
+          COALESCE(fl.eqart, '')                     AS eqart,
+          fl.iloan,
+          il.abckz,
+          il.zz_geo_coordinates,
+          il.adrnr,
+          il.tplnr                                   AS funcloc_no,
+          COALESCE(sn.strno,  fl.tplnr)              AS fl_label,
+          COALESCE(ft.pltxt,  '')                    AS fl_desc,
+          COALESCE(psn.strno, COALESCE(fl.tplma,'')) AS parent_label
+        FROM :lt_missing AS mp
+        INNER JOIN iflot  AS fl  ON  fl.mandt  = :lv_clnt AND fl.tplnr  = mp.tplnr
+        INNER JOIN iloa   AS il  ON  il.mandt  = :lv_clnt AND il.iloan  = fl.iloan
+                                 AND il.tplnr != ''
+        INNER JOIN t001w  AS t1w ON  t1w.mandt = :lv_clnt AND t1w.werks = il.swerk
+                                 AND t1w.iwerk = fl.iwerk
+        LEFT OUTER JOIN iflotx AS ft  ON  ft.mandt  = :lv_clnt AND ft.tplnr  = fl.tplnr
+                                      AND ft.spras  = :lv_lang
+        LEFT OUTER JOIN iflos  AS sn  ON  sn.mandt  = :lv_clnt AND sn.tplnr  = fl.tplnr
+                                      AND sn.actvs  = 'X' AND sn.prkey = 'X'
+        LEFT OUTER JOIN iflos  AS psn ON  psn.mandt = :lv_clnt AND psn.tplnr = fl.tplma
+                                      AND psn.actvs = 'X' AND psn.prkey = 'X'
+        WHERE fl.mandt = :lv_clnt;
+
+      -- Max counter (as integer) per order for gap-free counter assignment
+      lt_max_ctr = SELECT orderid, MAX(TO_INTEGER(counter)) AS max_ctr
+        FROM :lt_work GROUP BY orderid;
+
+      -- Build synthetic rows with new counters
+      lt_new_rows = SELECT
+          pd.orderid,
+          LPAD( TO_NVARCHAR( mc.max_ctr
+                             + ROW_NUMBER() OVER ( PARTITION BY pd.orderid
+                                                   ORDER BY pd.tplnr ) ),
+                4, '0' )                             AS counter,
+          CAST('' AS NVARCHAR(12))                   AS objectlistkey,
+          pd.iloan,
+          CAST('' AS NVARCHAR(12))                   AS notifno,
+          CAST('' AS NVARCHAR(18))                   AS equino,
+          pd.planplant,
+          pd.abckz                                   AS abcindicator,
+          pd.zz_geo_coordinates                      AS keygeocoordinates,
+          pd.adrnr                                   AS techobjaddressno,
+          pd.tplnr                                   AS techobjectkey,
+          pd.fl_label                                AS techobjectno,
+          pd.fl_desc                                 AS techobjectdesc,
+          pd.eqart                                   AS techobjecttype,
+          CAST(pd.objnr AS NVARCHAR(30))             AS techobjectinternalkey,
+          'EAMS_FL'                                  AS techobjiseequiporfuncnlloc,
+          pd.tplma                                   AS parenttechobjectkey,
+          CASE WHEN pd.tplma != ''
+               THEN 'PARENT_FUNCLOC' ELSE ''
+          END                                        AS parentobjectiseequiorfuncloc
+        FROM :lt_parent_data AS pd
+        INNER JOIN :lt_max_ctr AS mc ON mc.orderid = pd.orderid;
+
+      lv_added := RECORD_COUNT(:lt_new_rows);
+      IF :lv_added = 0 THEN BREAK; END IF;
+
+      lt_work = SELECT * FROM :lt_work
+                UNION ALL
+                SELECT * FROM :lt_new_rows;
+
+    END WHILE;
+
+    result = SELECT * FROM :lt_work;
 
   ENDMETHOD.
 
