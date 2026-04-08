@@ -12,7 +12,8 @@ define view entity /ETN/I_CSLA_MinValid
 {
   key kokrs,
   key lstar,
-      min( datbi ) as EarliestValidDateTo   // frühester Gültig-bis-Termin >= heute
+      min( datbi )  as EarliestValidDateTo, // frühester Gültig-bis-Termin >= heute
+      min( leinh )  as ActivityTypeUnit     // Mengeneinheit – in der Praxis je Leistungsart konstant
 }
 group by
   kokrs,

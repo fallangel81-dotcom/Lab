@@ -14,14 +14,15 @@ define view entity /ETN/I_CRCO_CRHD
       and lstart.lstar = costl.lstar
 
 {
-  key wkc.objid    as WorkCenterInternalId,
-  key costl.lstar  as DefaultActivityType,
-  key costl.endda  as CostCenterAssignmentEndDate,   // eine Zeile pro Zuordnungs-Zeitscheibe (crco)
+  key wkc.objid              as WorkCenterInternalId,
+  key costl.lstar            as DefaultActivityType,
+  key costl.endda            as CostCenterAssignmentEndDate, // eine Zeile pro Zuordnungs-Zeitscheibe (crco)
 
-      costl.kostl  as CostCenter,
-      costl.kokrs  as ControllingArea,
-      wkc.arbpl    as WorkCenter,
-      wkc.steus    as ControlKey
+      costl.kostl            as CostCenter,
+      costl.kokrs            as ControllingArea,
+      wkc.arbpl              as WorkCenter,
+      wkc.steus              as ControlKey,
+      lstart.ActivityTypeUnit as ActivityTypeUnit
 }
 
 where wkc.objty    =  'A'                            // nur Arbeitsplätze
