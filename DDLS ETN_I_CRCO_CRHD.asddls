@@ -22,7 +22,7 @@ define view entity /ETN/I_CRCO_CRHD
       costl.kokrs            as ControllingArea,
       wkc.arbpl              as WorkCenter,
       wkc.steus              as ControlKey,
-      lstart.ActivityTypeUnit as ActivityTypeUnit
+      lstart.leinh            as ActivityTypeUnit
 }
 
 where wkc.objty    =  'A'                            // nur Arbeitsplätze
