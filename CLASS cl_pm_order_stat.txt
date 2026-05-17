@@ -38,6 +38,12 @@ CLASS /ETN/CL_PM_VDM_STAT_ORDER IMPLEMENTATION.
 * 30.10.2024   N16951 V01.1    Defect 9300006772 Performance Massnr/Order DEOK9A04HT     *
 ******************************************************************************************
 
+  " $count requests carry no calc elements -> skip expensive status reads
+    if it_requested_calc_elements is initial.
+      ct_calculated_data = corresponding #( it_original_data ).
+      return.
+    endif.
+
   "-----------------------------------------------------------------------------"
     "--- Start of calculation for status fields in view /ETN/I_MEASURE_ORDER  ----"
     "-----------------------------------------------------------------------------"
